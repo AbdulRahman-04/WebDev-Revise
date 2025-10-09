@@ -1,0 +1,30 @@
+pwd - present working directory ( shows ur current file/folder path from home)
+ls - list out all files nd folders of ur terminal
+cd- change directory (cd foldername) or go back into main working directory 
+mkdir - make directory (folder)
+rmdir - remove directory
+rm - files or folders 
+cp - copy files and folders 
+mv - move or rename files 
+touch - create files 
+find - search for files nd firectories 
+locate - find a file by name 
+stat show detailed info about file 
+tree - display files in a directory as tree structure
+
+
+cat - view file content 
+tac - display file content in reverse order 
+more/less - view a file page by page 
+head - view first few lines of file 
+tail - view last few lines of file 
+grep - – Search text patterns in a file.
+cut - extract portion of text from files 
+sort - sort lines of text files 
+uniq - find unique lines in a file
+diff - compare two files line by line
+cmp - compare two files byte by byte
+
+chmod - change file permissions
+chown - change file ownership 
+umask - set default permissions for new files
