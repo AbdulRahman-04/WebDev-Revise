@@ -6,10 +6,10 @@ cd- change directory (cd foldername) or go back into main working directory
 mkdir - make directory (folder)
 rmdir - remove directory
 rm - files or folders 
-cp - copy files and folders 
+cp -r(for folders) || cp for files - copy files and folders 
 mv - move or rename files 
 touch - create files 
-find - search for files nd firectories 
+find - search for files nd directories 
 locate - find a file by name 
 stat show detailed info about file 
 tree - display files in a directory as tree structure
@@ -20,6 +20,7 @@ tree - display files in a directory as tree structure
 FILE AND TEXT PROCESSING COMMANDS: 
 
 cat - view file content 
+echo "Hello World" > file.txt || echo "This is new line" >> file.txt
 tac - display file content in reverse order 
 more/less - view a file page by page 
 head - view first few lines of file 
