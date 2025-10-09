@@ -1,3 +1,5 @@
+BASIC COMMANDS : 
+
 pwd - present working directory ( shows ur current file/folder path from home)
 ls - list out all files nd folders of ur terminal
 cd- change directory (cd foldername) or go back into main working directory 
@@ -13,6 +15,10 @@ stat show detailed info about file
 tree - display files in a directory as tree structure
 
 
+------------------------------------------------------
+
+FILE AND TEXT PROCESSING COMMANDS: 
+
 cat - view file content 
 tac - display file content in reverse order 
 more/less - view a file page by page 
@@ -25,6 +31,41 @@ uniq - find unique lines in a file
 diff - compare two files line by line
 cmp - compare two files byte by byte
 
+-----------------------------------------------------
+
+FILE PERMISSION AND OWNERSHIP COMMANDS:
+
 chmod - change file permissions
 chown - change file ownership 
 umask - set default permissions for new files
+
+
+----------------------------------------
+
+PROCESS MANAGEMENT 
+
+ps : display current running processes
+top: show real time processes
+htop: interactive process viewer
+kill - terminate a process by PID
+pkill - kill a process by name
+nice - start a process with specific priority
+jobs : display bg jobs
+bg : resume a bg job 
+fg : resume a job in the foreground.
+
+
+-----------------------------------------
+
+NETWORKING AND SYSTEM INFO: 
+
+ifconfig/ ip a : show network interface detail
+ping : check connectivity with a remote server 
+netstat : display network connections
+ss - show active socket connections
+wget : download files from web 
+curl : transfer data from url 
+df : show diskspace usage 
+du : show file space usage
+uptime : show system uptime
+uname -a : show system information
