@@ -1,0 +1,32 @@
+// ==========================
+// TypeScript Single-File Setup & Run
+// ==========================
+
+// 1️⃣ Install TypeScript globally
+// -------------------------------
+npm i -g typescript
+tsc -v   // check version
+
+// 2️⃣ (Optional) Install ts-node for direct run
+// ---------------------------------------------
+npm i -g ts-node
+
+// 3️⃣ Folder structure
+// -------------------
+// myTSFolder/
+//    └── 1.ts
+// No npm init required for single-file testing.
+// Just create .ts file inside the folder.
+
+// 4️⃣ Run TypeScript file
+
+// Option A: Old-school compile → run
+tsc 1.ts      // compiles TS → JS (creates 1.js)
+node 1.js     // run the JS
+// ✅ Safe, works everywhere.
+
+
+// 5️⃣ Quick Notes
+// ----------------
+// - .ts files cannot be run directly by Node unless ts-node is used or compiled to JS.
+// - For multiple files or bigger project, use: npm init + tsconfig.json
