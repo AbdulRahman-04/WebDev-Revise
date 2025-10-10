@@ -1,32 +1,159 @@
 // ==========================
-// TypeScript Single-File Setup & Run
+// ⚡ TypeScript Setup & Basics Notes
 // ==========================
 
-// 1️⃣ Install TypeScript globally
+// 1️⃣ INSTALL TYPESCRIPT GLOBALLY
 // -------------------------------
 npm i -g typescript
 tsc -v   // check version
 
-// 2️⃣ (Optional) Install ts-node for direct run
-// ---------------------------------------------
+// 2️⃣ (Optional) Install ts-node to run TS directly
+// -------------------------------------------------
 npm i -g ts-node
 
-// 3️⃣ Folder structure
-// -------------------
+// 3️⃣ FOLDER STRUCTURE (for single-file testing)
+// ----------------------------------------------
 // myTSFolder/
 //    └── 1.ts
-// No npm init required for single-file testing.
-// Just create .ts file inside the folder.
-
-// 4️⃣ Run TypeScript file
-
-// Option A: Old-school compile → run
-tsc 1.ts      // compiles TS → JS (creates 1.js)
-node 1.js     // run the JS
-// ✅ Safe, works everywhere.
+// No npm init required for testing single files.
 
 
-// 5️⃣ Quick Notes
-// ----------------
-// - .ts files cannot be run directly by Node unless ts-node is used or compiled to JS.
-// - For multiple files or bigger project, use: npm init + tsconfig.json
+// 4️⃣ RUN TYPE SCRIPT FILES
+// -------------------------
+// ✅ Option A (Old-school safe way):
+tsc 1.ts      // compiles TS → JS
+node 1.js     // runs compiled JS file
+
+// ✅ Option B (Shortcut with ts-node):
+ts-node 1.ts  // directly runs TS file (no .js generation)
+
+
+// ==========================
+// ⚡ BASIC TYPES IN TYPESCRIPT
+// ==========================
+
+// Primitive Types:
+let userName: string = "rahman";
+let age: number = 21;
+let isAlive: boolean = true;
+let isEmpty: null = null;
+let notDefined: undefined = undefined;
+
+console.log(userName, age, isAlive, isEmpty, notDefined);
+
+
+// ==========================
+// ⚡ ARRAYS
+// ==========================
+let boolArray: boolean[] = [true, false];
+let numArray: number[] = [49, 69, 89];
+let strArray: string[] = ["hi", "hello", "rahman"];
+
+
+// ==========================
+// ⚡ TUPLES
+// ==========================
+// Tuple → Fixed length, fixed data types
+let tupleArr: [string, boolean, number] = ["hi", true, 7];
+console.log(tupleArr);
+
+
+// ==========================
+// ⚡ ENUMS
+// ==========================
+// Enum = group of constant values under one name
+enum UserRoles {
+  ADMIN = "Admin",
+  USER = "User",
+  SUPERADMIN = "SuperAdmin"
+}
+
+enum StatusCodes {
+  ERROR = 404,
+  OK = 200
+}
+
+console.log(UserRoles.ADMIN, StatusCodes.ERROR);
+
+
+// ==========================
+// ⚡ SPECIAL TYPES
+// ==========================
+
+// any → can store any type (avoid using)
+let anything: any = 2025;
+anything = "hello";
+
+// unknown → safer alternative to any
+let value: unknown = "Rahman";
+if (typeof value === "string") {
+  console.log(value.toUpperCase());
+}
+
+// void → for functions that return nothing
+function sayName(): void {
+  console.log("rahman bhai");
+}
+sayName();
+
+// undefined → declared but not assigned
+let data: undefined;
+console.log(data);
+
+// never → function that never finishes normally
+function throwError(msg: string): never {
+  throw new Error(msg);
+}
+// throwError("error");
+
+
+// ==========================
+// ⚡ TYPE INFERENCE & ANNOTATION
+// ==========================
+// type inference → TS auto detects type
+let college = "DCET";
+
+// type annotation → manually define type
+let isStudent: boolean = true;
+
+
+// ==========================
+// ⚡ INTERFACES & TYPE ALIASES
+// ==========================
+
+// Interface → define shape of object
+interface MyDetails {
+  name: string;
+  age: number;
+  rollno: boolean;
+}
+
+function printDetails(user: MyDetails) {
+  console.log(user);
+}
+printDetails({ name: "Abdul", age: 21, rollno: true });
+
+// Extending interface
+interface Admin extends MyDetails {
+  admin: boolean;
+}
+let adminObj: Admin = { name: "Rahman", age: 21, rollno: true, admin: true };
+console.log(adminObj);
+
+// Type alias → custom datatype
+type MyType = string | number | boolean | null;
+let dataType: MyType = true;
+
+// Intersection type
+type UserInfo = MyDetails & { password: string };
+let user: UserInfo = { name: "Abdul", age: 21, rollno: true, password: "12345" };
+
+
+// ==========================
+// ⚡ SUMMARY
+// ==========================
+// ✅ tsc 1.ts → compile
+// ✅ node 1.js → run
+// ✅ ts-node 1.ts → direct run
+// ✅ focus only till: primitive, array, tuple, enum, special types, interfaces, aliases
+// ✅ enough for backend-level TS safety in Node or Express
