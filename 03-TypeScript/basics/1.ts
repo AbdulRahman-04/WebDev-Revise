@@ -179,3 +179,65 @@ console.log(myCollege, typeof myCollege);
 //  type annotations: it means when we declare a variable while also defining its data type.
 let getVar : boolean = true;
 console.log(getVar, typeof getVar);
+
+
+//  interfaces and type alises: 
+
+// interface: an interface is like a rulebox used for objects , as it tells what properties an object must have and also their types.
+
+interface myDetails{
+    name: string
+    age:number
+    rollno: boolean
+}
+
+function userDetails(details: myDetails){
+   
+    console.log(details);
+    
+
+
+}
+
+// userDetails({name:"abdul", age:21, rollno:true})
+
+
+// extending interfaces : 
+
+interface Admin extends myDetails {
+    admin: boolean
+}
+
+function isAdmin(obj : Admin){
+    console.log(obj);
+    
+}
+
+isAdmin({name:"abdul", age:21, rollno:true, admin:true})
+
+
+// type aliases : creating own custom datatype
+
+type lod = string
+
+let myName: lod = "fahad"
+console.log(myName);
+
+
+type myCustomType = string | number | boolean | null 
+
+let ab : myCustomType = 29
+console.log(ab);
+
+
+// union type : | or operator from js 
+
+let bc: string | number | boolean = true
+console.log(bc);
+
+
+// intersection type 
+type myType = lod & {
+    password: string,
+    age: number
+}

@@ -117,3 +117,17 @@ console.log(myCollege, typeof myCollege);
 //  type annotations: it means when we declare a variable while also defining its data type.
 var getVar = true;
 console.log(getVar, typeof getVar);
+function userDetails(details) {
+    console.log(details);
+}
+function isAdmin(obj) {
+    console.log(obj);
+}
+isAdmin({ name: "abdul", age: 21, rollno: true, admin: true });
+var myName = "fahad";
+console.log(myName);
+var ab = 29;
+console.log(ab);
+// union type : | or operator from js 
+var bc = true;
+console.log(bc);
