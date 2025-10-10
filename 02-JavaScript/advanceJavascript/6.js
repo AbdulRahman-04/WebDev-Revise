@@ -33,4 +33,4 @@ function SayName(name){
     }, 5000)
 }
 
-SayName("Syed Bhai")
+SayName("Syed Rahman is name")

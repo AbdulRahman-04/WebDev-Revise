@@ -124,4 +124,4 @@ function myName(name){
     }, 15000)
 
 }
-myName("Abdul Rahman")
+myName("Abdullah is name")
