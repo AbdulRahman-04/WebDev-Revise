@@ -2,16 +2,16 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "app.js",
   "scripts": {
-  "dev": "tsx src/app.ts",     
-  "build": "tsc",               
-  "start": "node server/dist/app.js" 
+  "dev": "tsx src/app.ts",         
+  "build": "tsc",                  
+  "start": "node dist/app.js"
 },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
+  "type": "commonjs",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "config": "^4.1.1",
@@ -27,7 +27,9 @@
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mongoose": "^5.11.96",
+    "@types/node": "^24.7.2",
     "@types/nodemailer": "^7.0.2",
-    "@types/twilio": "^3.19.2"
+    "@types/twilio": "^3.19.2",
+    "tsx": "^4.20.6"
   }
 }

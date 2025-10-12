@@ -1,6 +1,6 @@
 {
-    "PORT": "7075",
-    "DB_URL": "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/02ToDoBackend",
+    "PORT": "6065",
+    "DB_URL": "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/02ToDo-BackendTS",
     "USER": "abdulrahman.81869@gmail.com",
     "PASS": "bvfbujtvwnjkkjte",
     "SID": "",

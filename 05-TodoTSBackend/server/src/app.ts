@@ -1,15 +1,14 @@
-import express , {Request, Response, Application} from "express"
+import express, {Request, Response, Application} from "express"
 import config from "config"
-// dbImport 
 import "./utils/dbConnect"
 
 const app : Application = express()
 
-const PORT : string = config.get<string>("PORT")
+const PORT: string = config.get<string>("PORT")
 
 app.use(express.json())
 
-// get route 
+// route 
 app.get("/", async (req: Request, res: Response)=>{
     try {
 
@@ -22,8 +21,7 @@ app.get("/", async (req: Request, res: Response)=>{
 })
 
 
-// server start 
 app.listen(Number(PORT), ()=>{
-    console.log(`Your server is live at port ${PORT}` );
+    console.log(`server is live at port ${PORT}`);
     
 })
