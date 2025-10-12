@@ -1,5 +1,7 @@
 import express , {Request, Response, Application} from "express"
 import config from "config"
+// dbImport 
+import "./utils/dbConnect"
 
 const app : Application = express()
 

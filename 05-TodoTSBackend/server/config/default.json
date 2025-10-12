@@ -1,3 +1,11 @@
 {
-    "PORT": "7075"
+    "PORT": "7075",
+    "DB_URL": "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/02ToDoBackend",
+    "USER": "abdulrahman.81869@gmail.com",
+    "PASS": "bvfbujtvwnjkkjte",
+    "SID": "",
+    "TOKEN": "",
+    "PHONE": "",
+    "URL": "http://localhost:5006",
+    "JWT_KEY": "RAHMAN123"
 }

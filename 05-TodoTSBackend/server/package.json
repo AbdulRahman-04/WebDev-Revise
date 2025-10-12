@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon",
-    "build": "tsc",
-    "start": "node server/dist/app.js"
-  },
+  "dev": "tsx src/app.ts",     
+  "build": "tsc",               
+  "start": "node server/dist/app.js" 
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -28,7 +28,6 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mongoose": "^5.11.96",
     "@types/nodemailer": "^7.0.2",
-    "@types/twilio": "^3.19.2",
-    "ts-node": "^10.9.2"
+    "@types/twilio": "^3.19.2"
   }
 }
