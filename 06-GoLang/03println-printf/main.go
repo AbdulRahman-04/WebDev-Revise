@@ -6,8 +6,8 @@ func main(){
 	name := "raheem"
 	age := 21
 	isAlive := true
-	// clg := "dcet"
-	marks := 78.65
+	clg := "dcet"
+	// marks := 78.65
 
 	// fmt.Println("name", name)
 	// fmt.Println("age:", age)
@@ -16,12 +16,10 @@ func main(){
 	// fmt.Println("marks:", marks)
 
 
-    fmt.Println("%s", age , isAlive)
-	fmt.Println(marks)
+    fmt.Println("name is:", name)
+	fmt.Println("age is: %d", age)
 
-	fmt.Printf("name is: %s\n", name)
-	fmt.Printf("age is %d:\n", age)
-	fmt.Printf("isAlive : %t\n", isAlive)
-    fmt.Printf("marks is: %f\n", marks)
+	fmt.Printf("isAlive value is %t\n:", isAlive)
+    fmt.Printf("college is %s:\n", clg)
 
 }

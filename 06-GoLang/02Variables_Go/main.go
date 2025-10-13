@@ -35,4 +35,13 @@ func main(){
 	myAge := 21
 	fmt.Println(myAge)
 
+	var cohort = "c24"
+	fmt.Println(cohort)
+
+	const number = 8186978069
+	fmt.Println(number)
+
+	myage := 69 
+	fmt.Println(myage)
+
 }
