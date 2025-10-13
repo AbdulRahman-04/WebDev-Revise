@@ -9,7 +9,7 @@ interface EmailData {
     to: string,
     text?: string,
     subject: string,
-    html: string
+    html?: string
 }
 
 async function sendEmail(emailData:EmailData) {
@@ -17,7 +17,7 @@ async function sendEmail(emailData:EmailData) {
     try {
  
         let transporter = nodemailer.createTransport({
-            host: "smptp.gmail.com",
+            host: "smtp.gmail.com",
             port: 465,
             secure: true,
             auth: {
@@ -34,6 +34,7 @@ async function sendEmail(emailData:EmailData) {
             html: emailData.html
         })
 
+          console.log("email sent successfully: ", `${emailData.to}: ${sender.messageId}`);
         
     } catch (error) {
         console.log(error);
