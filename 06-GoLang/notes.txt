@@ -1,0 +1,42 @@
+# Go Concurrency & Scheduler Notes
+
+## 1️⃣ Concurrency vs Parallelism
+
+**Concurrency:**  
+- Multiple tasks **handle** karna ek saath (time-slicing)  
+- Ek core pe bhi ho sakta hai  
+- Fast switching hota hai goroutines ke beech  
+- Example: Ek banda phone aur cooking dono **fast switch** karke manage kar raha  
+
+**Parallelism:**  
+- Multiple tasks **literally ek sath** run karna  
+- Multiple CPU cores required  
+- Example: 2 log alag-alag kaam ek sath kar rahe  
+
+**Summary Table:**
+
+| Feature      | Concurrency                     | Parallelism                  |
+|-------------|---------------------------------|------------------------------|
+| Execution   | Interleaving / switching        | Truly simultaneous           |
+| CPU cores   | 1 or more                       | >1 cores                     |
+| Example     | Single core 10 goroutines switch| 10 cores 10 goroutines run   |
+
+---
+
+## 2️⃣ Goroutines
+
+- Lightweight threads in Go  
+- Memory ~2 KB per goroutine  
+- Use `go func()` to create  
+
+```go
+go task("Task1")
+go task("Task2")
+task("MainTask")
+
+             Scheduler
+                 │
+ ┌───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┐
+ │Core1  │Core2  │Core3  │Core4  │Core5  │Core6  │Core7  │Core8  │
+ │G1,G9..│G2,G10 │G3,G11 │G4,G12 │G5,G13 │G6,G14 │G7,G15 │G8,G16 │
+ └───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┘
