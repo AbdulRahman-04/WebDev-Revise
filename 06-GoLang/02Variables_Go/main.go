@@ -44,4 +44,13 @@ func main(){
 	myage := 69 
 	fmt.Println(myage)
 
+
+	var area = "baradari"
+	fmt.Println(area)
+
+	const value = 1028;
+	fmt.Println(value)
+
+	myValue := "Abdul Rahman"
+	fmt.Println(myValue)
 }

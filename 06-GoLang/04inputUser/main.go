@@ -21,11 +21,28 @@ func main(){
 
 	// bufio 
 
-	fmt.Println("Enter ur username")
+	// fmt.Println("Enter ur username")
 
+	// reader := bufio.NewReader(os.Stdin)
+	// userInput , _ := reader.ReadString('.')
+	// fmt.Println(userInput)
+
+
+	fmt.Println("Enter ur email")
+	// var name string
+
+	// fmt.Scan(&name)
+
+	// fmt.Println(name)
+
+
+	// bufio 
 	reader := bufio.NewReader(os.Stdin)
-	userInput , _ := reader.ReadString('.')
-	fmt.Println(userInput)
+	value, _ := reader.ReadString('.')
+
+	fmt.Println(value)
+
+
 
 
 }
