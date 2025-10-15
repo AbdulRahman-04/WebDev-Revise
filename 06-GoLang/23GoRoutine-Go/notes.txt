@@ -1,0 +1,33 @@
+✅ Correct Understanding
+
+Main function bhi ek goroutine hai
+
+Jab program start hota hai → Go runtime automatically main goroutine create karta hai.
+
+Background goroutines
+
+go greet() aur go work() → dono background goroutines hain, independent of main.
+
+Scheduler ke pass ab total 3 goroutines hain: main + greet + work
+
+Scheduler ka kaam
+
+CPU ke upar decide karta hai kis goroutine ko kab run karna hai
+
+Agar ek goroutine me time.Sleep() ya I/O delay hai → scheduler switch kar deta hai doosri goroutine pe execution ke liye
+
+Isliye greet aur work alternate steps me execute hote hain → ye concurrent execution dikhata hai
+
+Time-based switching
+
+time.Sleep() goroutines ko temporarily pause karta hai
+
+Scheduler fir dusre goroutine ko run karata hai
+
+Yeh interleaving hota hai, isiliye output har run me thoda different lag sakta hai
+
+Main function termination
+
+Jab main goroutine ka kaam khatam ho jaata hai → program terminate ho jaata hai
+
+Agar sleep ya WaitGroup na ho → background goroutines complete nahi kar paate

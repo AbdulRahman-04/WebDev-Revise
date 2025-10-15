@@ -5,19 +5,27 @@ import (
 	"time"
 )
 
-func Task(name string){
-	for i := 0; i <= 3; i++ {
-		 fmt.Println(name)
-		 time.Sleep(time.Millisecond*200)
+func greet() {
+	for i := 1; i <= 5; i++ {
+		fmt.Println("👋 Hello from goroutine", i)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
-func main(){
-	go Task("do golang")
-	go Task("do go gin mongo project")
-	go Task("do frontend")
-
-	fmt.Println("code finished")
-
-	time.Sleep(time.Second*1)
+func work() {
+	for i := 1; i <= 5; i++ {
+		fmt.Println("💼 Working...", i)
+		time.Sleep(500 * time.Millisecond)
+	}
 }
+
+func main() {
+	go greet()
+	go work()
+
+	fmt.Println("💬 Main function running...")
+	time.Sleep(4 * time.Second)
+	fmt.Println("✅ Main function ended")
+}
+
+
