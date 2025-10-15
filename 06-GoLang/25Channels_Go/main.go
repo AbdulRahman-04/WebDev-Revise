@@ -1,64 +1,30 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+	"time"
+)
 
+func worker(id int, wg *sync.WaitGroup) {
+	defer wg.Done() // ✅ Worker bolta hai: "Mera kaam ho gaya"
 
-/* THERE ARE TWO TYPES OF CHANNELS IN GO : BUFFERED , UNBUFFERED
-   
-   UNBUFFERD : YE AISA CHANNEL H JISKU CREATE KRTE WAQT AAP YE CHANNEL M KITTA DATA STORE KRSKTE WO LIMIT NI DETE. E.G
-   chan1 := make(chan string) -> idhr aap sirf channel bnaadiye bina bataye k isme kitta data store hunga
-
-   BUFFERED: YE AISA CHANNEL H JISME AAP BATATE K KITTA DATA STORE KRINGE MAXIMUM ND AGAR LIMIT SE ZYADA DATA BHEJE TOH DEADLOCK ERR AJATA.
-   chan2 := make(chan string, 2) -> 2 string ka data store krsktu m sirf 
-
-   buffered channel k data print krana h toh pehle sender func m channel k andar data daalke close krdena channel close(chan2) then main func m
-   for loop m range keyword chan2 pe lgake use data print krwa skte 
-   for data := range chan2  {
-        fmt.println(data)
-     }
-
-	unbuffered m b aap chuncks m data send krskte ek hi channel m lekin wahi channel close krke buffered jaisa loop krake print krwana pdta data 
-
-*/
-
-
-//////////////////////////////
-// ✅ CASE 1: Unbuffered channel with only ONE message
-//////////////////////////////
-
-// 🔹 Sender sends only one value
-func sendSingle(ch chan string) {
-	ch <- "Sirf ek message bhai"
-}
-
-//////////////////////////////
-// ✅ CASE 2: Buffered/Unbuffered channel with MULTIPLE messages
-//////////////////////////////
-
-// 🔹 Sender sends multiple values and closes the channel after done
-func sendMultiple(ch chan string) {
-	ch <- "Message 1"
-	ch <- "Message 2"
-	ch <- "Message 3"
-	close(ch) // 🔒 Always close the channel from sender side when done sending
+	for i := 1; i <= 3; i++ {
+		fmt.Printf("Worker %d → step %d\n", id, i)
+		time.Sleep(300 * time.Millisecond)
+	}
 }
 
 func main() {
-	// ----------- CASE 1 -------------
-	ch1 := make(chan string) // Unbuffered channel
-	go sendSingle(ch1)
+	var wg sync.WaitGroup // ✅ Register banaya
 
-	// ✅ For single value — direct receive into a variable
-	msg := <-ch1
-	fmt.Println("Single Value Received:", msg)
+	wg.Add(3) // ✅ Bataya ki 3 workers aane wale hain
 
-	// ----------- CASE 2 -------------
-	ch2 := make(chan string, 3) // Buffered channel (can also be unbuffered)
+	go worker(1, &wg)
+	go worker(2, &wg)
+	go worker(3, &wg)
 
-	go sendMultiple(ch2)
+	wg.Wait() // ✅ Ruk jao jab tak sab Done na bol dein
 
-	// ✅ For multiple values — use range (requires channel to be closed)
-	for val := range ch2 {
-		fmt.Println("Multiple Value Received:", val)
-	}
+	fmt.Println("✅ All workers finished")
 }
