@@ -218,7 +218,7 @@ isAdmin({name:"abdul", age:21, rollno:true, admin:true})
 
 // type aliases : creating own custom datatype
 
-type lod = string
+type lod = string | null | boolean 
 
 let myName: lod = "fahad"
 console.log(myName);
