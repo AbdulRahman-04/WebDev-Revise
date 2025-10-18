@@ -1,0 +1,17 @@
+Channels kya hain?
+
+Channel = goroutines ke beech safe communication ka pipe
+
+Matlab ek goroutine data bhej sakta hai, aur dusra goroutine us data ko receive kar sakta hai.
+
+Ye race condition se bachata hai, bina mutex ke.
+
+Analogy: 📮
+
+Soch ek mailbox hai:
+
+Goroutine 1 → letter daalta hai (send)
+
+Goroutine 2 → letter uthata hai (receive)
+
+Channels ekdum waisa hi kaam karte hain Go me.
