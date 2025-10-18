@@ -5,27 +5,26 @@ import (
 	"time"
 )
 
-func greet() {
-	for i := 1; i <= 5; i++ {
-		fmt.Println("👋 Hello from goroutine", i)
-		time.Sleep(500 * time.Millisecond)
+func Work(){
+	for i:=0; i<= 10; i++ {
+		fmt.Println("Work1 is done")
+
+		time.Sleep(1000*time.Millisecond)
 	}
 }
 
-func work() {
-	for i := 1; i <= 5; i++ {
-		fmt.Println("💼 Working...", i)
-		time.Sleep(500 * time.Millisecond)
+func Work2(){
+	for j := 0; j <= 10; j ++ {
+		fmt.Println("WORK 2 is done")
+
+		time.Sleep(1000*time.Millisecond)
 	}
 }
 
-func main() {
-	go greet()
-	go work()
+func main(){
+	go Work()
+	go Work2()
 
-	fmt.Println("💬 Main function running...")
-	time.Sleep(4 * time.Second)
-	fmt.Println("✅ Main function ended")
+
+	time.Sleep(15*time.Second)
 }
-
-
