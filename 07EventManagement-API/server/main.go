@@ -3,15 +3,15 @@ package main
 import "github.com/gin-gonic/gin"
 
 func main(){
- 
 	router := gin.Default()
 
-	router.GET("/", func(c *gin.Context) {
-       c.JSON(200, gin.H{
-		"msg": "Hello World API",
-	   })
+	router.GET("/", func (c*gin.Context)  {
+
+		c.JSON(200, gin.H{
+			"msg": "Hello world api",
+		})
+		
 	})
 
-	router.Run(":2025")
-
+	router.Run(":6565")
 }

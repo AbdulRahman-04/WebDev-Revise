@@ -6,17 +6,19 @@ type Config struct {
 	DBURL string
 	URL string
 	JWTKEY string
-	Email EmailConfig
+	Email EmailConfig 
 	Phone PhoneConfig
 	Redis RedisConfig
 }
+
 type EmailConfig struct {
 	USER string
 	PASS string
 }
+
 type PhoneConfig struct {
-	SID   string
-	TOKEN  string
+	SID string
+	TOKEN string
 	PHONE string
 }
 
@@ -27,23 +29,23 @@ type RedisConfig struct {
 }
 
 var AppConfig = &Config{
-	AppName: "BookMyEVENT",
-	Port: 3030,
-	DBURL: "",
-	URL: "http://localhost:3030",
+	AppName: "BookMyEvent.com",
+	Port: 6565,
+	DBURL: "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/BookMyEvent.com",
+	URL: "http://localhost:6565",
 	JWTKEY: "RAHMAN123",
 	Email: EmailConfig{
-		USER:  "",
-		PASS: "",
+		USER: "abdulrahman.81869@gmail.com",
+		PASS: "ttkv mljj ukcp ijcl",
 	},
 	Phone: PhoneConfig{
 		SID: "",
 		TOKEN: "",
 		PHONE: "",
 	},
-	Redis:  RedisConfig{
-		Host: "localhots:6379",
+	Redis: RedisConfig{
+		Host: "localhost:6379",
 		Password: "",
-		DB: 0,
+		DB:  0,
 	},
 }
