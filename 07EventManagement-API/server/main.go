@@ -6,12 +6,10 @@ func main(){
 	router := gin.Default()
 
 	router.GET("/", func (c*gin.Context)  {
-
 		c.JSON(200, gin.H{
 			"msg": "Hello world api",
 		})
-		
 	})
 
-	router.Run(":6565")
+	router.Run(":3435")
 }
