@@ -7,8 +7,9 @@ import (
 
 func main(){
 
-	// db import 
+	// Mongodb & redis import 
 	utils.DbConnect()
+    utils.RedisConnect()
 
 	router := gin.Default()
 
@@ -18,5 +19,5 @@ func main(){
 		})
 	})
 
-	router.Run(":3435")
+	router.Run(":7575")
 }
