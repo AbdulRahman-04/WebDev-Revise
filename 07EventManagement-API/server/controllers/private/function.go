@@ -117,6 +117,9 @@ func GetAllFunctions(c *gin.Context) {
 	}()
 
 	wg.Wait()
+ 
+	// wait for go routines to be finished
+
 	if countErr != nil || findErr != nil {
 		c.JSON(400, gin.H{"msg": "DB error"})
 		return
