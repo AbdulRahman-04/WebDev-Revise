@@ -1,51 +1,51 @@
 package config
 
-type  Config struct {
+type Config struct {
 	AppName string
-	Port int
-	DBURL string
-	URL string
-	JWTKEY string
-	Email EmailConfig
-	Phone PhoneConfig
-	Redis RedisConfig
+	Port    int
+	DBURI   string
+	URL     string
+	JWTKEY  string
+	Email   EmailConfig
+	Phone   PhoneConfig
+	Redis   RedisConfig // 🔥 add this
 }
 
-type EmailConfig struct{
-	USER string
-	PASS string
-}
- 
-type PhoneConfig struct{
-	SID string
-    TOKEN string
-	PHONE string
+type EmailConfig struct {
+	User string
+	Pass string
 }
 
-type RedisConfig struct{
-	Host string
+type PhoneConfig struct {
+	Sid   string
+	Token string
+	Phone string
+}
+
+type RedisConfig struct { // 🔥 add this
+	Host     string
 	Password string
-	DB int
+	DB       int
 }
 
 var AppConfig = &Config{
-	AppName: "BookMyEvents.com",
-	Port: 9090,
-	DBURL: "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/BookMyEvents.com",
-	URL: "http://localhost:9099",
-	JWTKEY: "RAHMAN123",
+	AppName: "Event_Booking",
+	Port:    4040,
+	DBURI:   "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/Event_Booking",
+	URL:     "http://localhost:4040",
+	JWTKEY:  "RAHMAN123",
 	Email: EmailConfig{
-		USER: "abdulrahman.81869@gmail.com",
-		PASS: "gdwi eqgw bisl iihw",
+		User: "abdulrahman.81869@gmail.com",
+		Pass: "erkg pyjg sbwn fhta",
 	},
 	Phone: PhoneConfig{
-		SID: "",
-		TOKEN: "",
-		PHONE: "",
+		Sid:   "your_twilio_sid_here",
+		Token: "your_twilio_token_here",
+		Phone: "+1234567890",
 	},
-	Redis: RedisConfig{
-		Host: "localhost:6379",
+	Redis: RedisConfig{ // 🔥 add this
+		Host:     "localhost:6379",
 		Password: "",
-		DB: 0,
+		DB:       0,
 	},
 }

@@ -1,0 +1,35 @@
+GO BACKEND SETUP:
+
+
+--> go to wsl 
+--> sudo apt upgrade && sudo apt update 
+--> mkdir Project-Name
+--> cd Project-Name
+--> mkdir server && cd server
+--> go mod init github.com/GITHUB_USERNAME/Project-Name/server
+--> touch main.go .gitignore
+
+
+ALL PACKAGES LINKS:
+to install existing packages : go mod tidy
+
+to install any go package => e.g: go get "github.com/gin-gonic/gin"
+
+
+// ALL PACKAGES 
+"github.com/gin-gonic/gin"
+go.mongodb.org/mongo-driver/mongo
+gopkg.in/gomail.v2
+github.com/twilio/twilio-go
+github.com/ulule/limiter/v3/drivers/store/redis
+
+
+
+
+
+
+
+
+
+
+

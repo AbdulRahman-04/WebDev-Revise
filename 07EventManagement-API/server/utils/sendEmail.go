@@ -3,41 +3,41 @@ package utils
 import (
 	"fmt"
 
-	"github.com/AbdulRahman-04/07EvenetManagement-API/server/config"
+	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/config"
 	"gopkg.in/gomail.v2"
 )
 
-type EmailData struct{
+type EmailData struct {
 	From string
 	To string
 	Subject string
 	Text string
-	HTML string
+	Html string
 }
 
-func SendEmail(data EmailData) {
+func SendEmail(data EmailData) error {
+	// get user and pass
+	user := config.AppConfig.Email.User
+	pass := config.AppConfig.Email.Pass
 
-	// get user nad pass
-	User := config.AppConfig.Email.USER
-	Pass := config.AppConfig.Email.PASS
-
-	// create sender 
+	// get sender ready 
 	s := gomail.NewMessage()
 
-	s.SetAddressHeader("From", User, "BookMyEvents.com")
+	s.SetAddressHeader("From", user, "Team Ivents Plannerz🎉")
 	s.SetHeader("To", data.To)
 	s.SetHeader("Subject", data.Subject)
 	s.SetBody("text/plain", data.Text)
-	s.AddAlternative("text/html", data.HTML)
+	s.AddAlternative("text/html", data.Html)
 
-	// create transporter 
-	t := gomail.NewDialer("smtp.gmail.com", 465, User, Pass)
+	// get transporter ready 
+	t := gomail.NewDialer("smtp.gmail.com", 465, user, pass)
 
-	// try sending mail
+	// try sending the mail 
 	err := t.DialAndSend(s)
 	if err != nil {
-		fmt.Println("error sending email")
-		return
+		fmt.Println("Couldn't send Email")
 	}
-	fmt.Println("Email sent✅")
+
+	fmt.Println("SMS Sent✅")
+	return nil
 }

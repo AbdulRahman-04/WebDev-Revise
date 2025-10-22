@@ -5,30 +5,30 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AbdulRahman-04/07EvenetManagement-API/server/config"
+	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/config"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var MongoClient *mongo.Client
+var MongoClient*mongo.Client
 
-func DbConnect() error {
-	// ctx 
+func DBConnect() error {
+	// ctx
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// connection 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(config.AppConfig.DBURL))
-    if err != nil {
-		fmt.Println("Error connecting db")
+	// connection request send
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(config.AppConfig.DBURI))
+	if err != nil {
+		fmt.Println("Coundlnt connect to mongoDb", err)
 	}
 
-	// ping 
+	// send test request to mongodb 
 	if err := client.Ping(ctx, nil); err != nil {
-		fmt.Println("test db failed")
+		fmt.Println("Test Request failed", err)
 	}
 
 	MongoClient = client
-	fmt.Println("MongoDB Connected Successfull!`✅")
+	fmt.Println("MongoDB Connected Successfully!✅")
 	return  nil
 }
