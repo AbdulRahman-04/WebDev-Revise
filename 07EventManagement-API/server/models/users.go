@@ -30,6 +30,10 @@ type User struct {
 	RefreshToken  string    `bson:"refreshToken" json:"refreshToken"`
 	RefreshExpiry time.Time `bson:"refreshExpiry" json:"refreshExpiry"`
 
+	// forgot pass api 
+	// New field for forgot password rate limit
+	LastForgotPassRequest time.Time `bson:"lastForgotRequest,omitempty" json:"lastForgotRequest,omitempty"`
+
 	Createdat time.Time  `bson:"created_at" json:"created_at"`
 	Updatedat time.Time  `bson:"updated_at" json:"updated_at"`
 }

@@ -298,151 +298,176 @@ func RefreshToken(c *gin.Context) {
 	})
 }
 
+//                         USER CHANGE PASS [ THIS IS A PRIVATE API]
+// -------------------- USER CHANGE PASSWORD --------------------
 func UserChangePass(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	type UserChangePass struct {
-		Email       string `json:"email" form:"email"`
-		Oldpassword string `json:"oldpassword" form:"oldpassword"`
-		Newpassword string `json:"newpassword" form:"newpassword"`
+	// 🧩 Input struct defined inside function
+	type ChangePass struct {
+		OldPassword string `json:"oldPassword" binding:"required"`
+		NewPassword string `json:"newPassword" binding:"required"`
 	}
 
-	var inputUser UserChangePass
-	if err := c.ShouldBindJSON(&inputUser); err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid request"})
+	// Step 1: Get JWT token from header
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		c.JSON(401, gin.H{"error": "Missing token"})
 		return
 	}
-	if inputUser.Email == "" || inputUser.Oldpassword == "" || inputUser.Newpassword == "" ||
-		!strings.Contains(inputUser.Email, "@") || len(inputUser.Newpassword) < 6 {
-		c.JSON(400, gin.H{"msg": "Invalid input"})
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Step 2: Parse JWT token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(config.AppConfig.JWTKEY), nil
+	})
+	if err != nil || !token.Valid {
+		c.JSON(401, gin.H{"error": "Invalid or expired token"})
 		return
 	}
 
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		c.JSON(401, gin.H{"error": "Invalid token claims"})
+		return
+	}
+	email, ok := claims["email"].(string)
+	if !ok {
+		c.JSON(401, gin.H{"error": "Invalid token email"})
+		return
+	}
+
+	// Step 3: Bind input JSON
+	var input ChangePass
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	// Step 4: Find user in DB
 	var user models.User
-	if err := userCollection.FindOne(ctx, bson.M{"email": inputUser.Email}).Decode(&user); err != nil {
-		c.JSON(400, gin.H{"msg": "No email found"})
+	err = userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "User not found"})
 		return
 	}
 
-	var (
-		passErr    error
-		hashPass   []byte
-		hashErr    error
-		updateErr  error
-	)
+	// Step 5: Compare old password + hash new password concurrently
+	var wg sync.WaitGroup
+	var passErr, hashErr error
+	var hashPass []byte
 
-	wg := sync.WaitGroup{}
 	wg.Add(2)
-
 	go func() {
-		defer wg.Done()
-		passErr = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(inputUser.Oldpassword))
+		passErr = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.OldPassword))
+		wg.Done()
 	}()
-
 	go func() {
-		defer wg.Done()
-		hashPass, hashErr = bcrypt.GenerateFromPassword([]byte(inputUser.Newpassword), 10)
+		hashPass, hashErr = bcrypt.GenerateFromPassword([]byte(input.NewPassword), 10)
+		wg.Done()
 	}()
-
 	wg.Wait()
+
 	if passErr != nil {
-		c.JSON(400, gin.H{"msg": "Invalid old password"})
+		c.JSON(401, gin.H{"error": "Old password incorrect"})
 		return
 	}
 	if hashErr != nil {
-		c.JSON(500, gin.H{"msg": "Hashing failed"})
+		c.JSON(500, gin.H{"error": "Failed to hash new password"})
 		return
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		update := bson.M{"$set": bson.M{
-			"password":   string(hashPass),
-			"updated_at": time.Now(),
-		}}
-		_, updateErr = userCollection.UpdateByID(ctx, user.ID, update)
-	}()
-	wg.Wait()
+	// Step 6: Update password and clear refresh token
+	update := bson.M{
+		"$set": bson.M{
+			"password":     string(hashPass),
+			"refreshToken": "", // invalidate old refresh token
+			"updated_at":   time.Now(),
+		},
+	}
 
+	_, updateErr := userCollection.UpdateByID(ctx, user.ID, update)
 	if updateErr != nil {
-		c.JSON(400, gin.H{"msg": "Database error"})
+		c.JSON(500, gin.H{"error": "Failed to update password"})
 		return
 	}
 
-	c.JSON(200, gin.H{"msg": "Password Changed Successfully!✅"})
+	c.JSON(200, gin.H{
+		"msg": "Password updated successfully ✅",
+	})
 }
 
 
-func UserForgotPass(c *gin.Context) {
+// ForgotPass API
+func ForgotPass(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	type UserForgotPass struct {
-		Email string `json:"email" form:"email"`
+	type Request struct {
+		Email string `json:"email"`
 	}
 
-	var inputUser UserForgotPass
-	if err := c.ShouldBindJSON(&inputUser); err != nil || !strings.Contains(inputUser.Email, "@") || inputUser.Email == "" {
-		c.JSON(400, gin.H{"msg": "Invalid Email"})
+	var input Request
+	if err := c.ShouldBindJSON(&input); err != nil || input.Email == "" {
+		c.JSON(400, gin.H{"msg": "email required"})
 		return
 	}
 
+	// find user
 	var user models.User
-	if err := userCollection.FindOne(ctx, bson.M{"email": inputUser.Email}).Decode(&user); err != nil {
-		c.JSON(400, gin.H{"msg": "No email found"})
+	err := userCollection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&user)
+	if err != nil {
+		c.JSON(400, gin.H{"msg": "email not found"})
 		return
 	}
 
-	tempPass := GenerateUserToken(8)
-
-	var (
-		hashNewPass []byte
-		hashErr     error
-		updateErr   error
-	)
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		hashNewPass, hashErr = bcrypt.GenerateFromPassword([]byte(tempPass), 10)
-	}()
-
-	wg.Wait()
-	if hashErr != nil {
-		c.JSON(500, gin.H{"msg": "Hashing failed"})
+	// rate limit check
+	if user.LastForgotPassRequest.After(time.Now().Add(-15 * time.Minute)) {
+		c.JSON(429, gin.H{"msg": "Password reset already requested. Try later."})
 		return
 	}
+
+	// generate temp token
+	tempToken := GenerateToken(12)
+	expiry := time.Now().Add(15 * time.Minute)
+
+	// concurrent DB update + email
+	var wg sync.WaitGroup
+	var updateErr error
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		update := bson.M{"$set": bson.M{
-			"password":   string(hashNewPass),
-			"updated_at": time.Now(),
-		}}
+		update := bson.M{
+			"$set": bson.M{
+				"tempPassToken": tempToken,
+				"tempPassExpiry": expiry,
+				"lastForgotRequest": time.Now(),
+				"updated_at": time.Now(),
+			},
+		}
 		_, updateErr = userCollection.UpdateByID(ctx, user.ID, update)
 	}()
 	wg.Wait()
 
 	if updateErr != nil {
-		c.JSON(400, gin.H{"msg": "Database error"})
+		c.JSON(500, gin.H{"msg": "db update error"})
 		return
 	}
 
-	// 🚀 Fire email in background (no wait)
-	go func() {
+	// send email concurrently
+	go func(email, token string) {
 		emailData := utils.EmailData{
 			From:    "Team Ivents Plannerz🎉",
-			To:      inputUser.Email,
+			To:      email,
 			Subject: "Reset Password Request",
-			Html:    fmt.Sprintf(`<h2>Your Temporary password is <strong>%s</strong></h2>`, tempPass),
+			Html:    fmt.Sprintf(`<h2>Use this token to reset your password (valid 15 min):</h2><p>%s</p>`, token),
 		}
 		_ = utils.SendEmail(emailData)
-	}()
+	}(input.Email, tempToken)
 
-	c.JSON(200, gin.H{"msg": "Temporary password sent to your email✅✨"})
+	c.JSON(200, gin.H{"msg": "Password reset token sent to your email✅"})
 }
