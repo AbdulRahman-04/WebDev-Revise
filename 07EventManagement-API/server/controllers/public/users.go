@@ -400,8 +400,8 @@ func UserChangePass(c *gin.Context) {
 	})
 }
 
-
-// ForgotPass API
+ 
+// ForgotPass API (Simple + Concurrent)
 func ForgotPass(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -424,17 +424,11 @@ func ForgotPass(c *gin.Context) {
 		return
 	}
 
-	// rate limit check
-	if user.LastForgotPassRequest.After(time.Now().Add(-15 * time.Minute)) {
-		c.JSON(429, gin.H{"msg": "Password reset already requested. Try later."})
-		return
-	}
-
-	// generate temp token
+	// generate temporary token & expiry
 	tempToken := GenerateToken(12)
 	expiry := time.Now().Add(15 * time.Minute)
 
-	// concurrent DB update + email
+	// concurrent DB update + email send
 	var wg sync.WaitGroup
 	var updateErr error
 
@@ -443,10 +437,9 @@ func ForgotPass(c *gin.Context) {
 		defer wg.Done()
 		update := bson.M{
 			"$set": bson.M{
-				"tempPassToken": tempToken,
+				"tempPassToken":  tempToken,
 				"tempPassExpiry": expiry,
-				"lastForgotRequest": time.Now(),
-				"updated_at": time.Now(),
+				"updated_at":     time.Now(),
 			},
 		}
 		_, updateErr = userCollection.UpdateByID(ctx, user.ID, update)
@@ -458,13 +451,15 @@ func ForgotPass(c *gin.Context) {
 		return
 	}
 
-	// send email concurrently
+	// send email concurrently 
 	go func(email, token string) {
 		emailData := utils.EmailData{
 			From:    "Team Ivents Plannerz🎉",
 			To:      email,
 			Subject: "Reset Password Request",
-			Html:    fmt.Sprintf(`<h2>Use this token to reset your password (valid 15 min):</h2><p>%s</p>`, token),
+			Html: fmt.Sprintf(
+				`<h2>Use this token to reset your password (valid 15 min):</h2>
+				<p style="font-size:18px;font-weight:bold;">%s</p>`, token),
 		}
 		_ = utils.SendEmail(emailData)
 	}(input.Email, tempToken)
