@@ -466,3 +466,5 @@ func ForgotPass(c *gin.Context) {
 
 	c.JSON(200, gin.H{"msg": "Password reset token sent to your email✅"})
 }
+
+// forgot pass api done
