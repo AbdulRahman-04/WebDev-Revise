@@ -400,19 +400,24 @@ func UserChangePass(c *gin.Context) {
 	})
 }
 
- 
-// ForgotPass API (Simple + Concurrent)
+
 func ForgotPass(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	type Request struct {
+	type ForgotPassInput struct {
 		Email string `json:"email"`
 	}
 
-	var input Request
-	if err := c.ShouldBindJSON(&input); err != nil || input.Email == "" {
-		c.JSON(400, gin.H{"msg": "email required"})
+	var input ForgotPassInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Request"})
+		return
+	}
+
+	// validate email
+	if input.Email == "" || !strings.Contains(input.Email, "@") {
+		c.JSON(400, gin.H{"msg": "Invalid Email"})
 		return
 	}
 
@@ -420,50 +425,55 @@ func ForgotPass(c *gin.Context) {
 	var user models.User
 	err := userCollection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&user)
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "email not found"})
+		c.JSON(400, gin.H{"msg": "Email not found"})
 		return
 	}
 
-	// generate temporary token & expiry
-	tempToken := GenerateToken(12)
-	expiry := time.Now().Add(15 * time.Minute)
+	// generate temporary password
+	tempPass := GenerateUserToken(10)
 
-	// concurrent DB update + email send
+	// hash password first (sync)
+	hashPass, hashErr := bcrypt.GenerateFromPassword([]byte(tempPass), 10)
+	if hashErr != nil {
+		c.JSON(500, gin.H{"msg": "Error hashing password"})
+		return
+	}
+
+	// update user password concurrently
 	var wg sync.WaitGroup
-	var updateErr error
-
 	wg.Add(1)
+
+	var updateErr error
 	go func() {
 		defer wg.Done()
-		update := bson.M{
+		_, updateErr = userCollection.UpdateByID(ctx, user.ID, bson.M{
 			"$set": bson.M{
-				"tempPassToken":  tempToken,
-				"tempPassExpiry": expiry,
-				"updated_at":     time.Now(),
+				"password":   string(hashPass),
+				"updated_at": time.Now(),
 			},
-		}
-		_, updateErr = userCollection.UpdateByID(ctx, user.ID, update)
+		})
 	}()
+
 	wg.Wait()
 
 	if updateErr != nil {
-		c.JSON(500, gin.H{"msg": "db update error"})
+		c.JSON(500, gin.H{"msg": "Database update failed"})
 		return
 	}
 
-	// send email concurrently 
-	go func(email, token string) {
+	// send email concurrently (non-blocking)
+	go func(email, pass string) {
 		emailData := utils.EmailData{
 			From:    "Team Ivents Plannerz🎉",
 			To:      email,
-			Subject: "Reset Password Request",
-			Html: fmt.Sprintf(
-				`<h2>Use this token to reset your password (valid 15 min):</h2>
-				<p style="font-size:18px;font-weight:bold;">%s</p>`, token),
+			Subject: "Password Reset Request",
+			Html: fmt.Sprintf(`
+				<h2>Your temporary password:</h2>
+				<p style="font-size:18px; font-weight:bold;">%s</p>
+				<p>Please login and change it immediately.</p>`, pass),
 		}
 		_ = utils.SendEmail(emailData)
-	}(input.Email, tempToken)
+	}(input.Email, tempPass)
 
-	c.JSON(200, gin.H{"msg": "Password reset token sent to your email✅"})
+	c.JSON(200, gin.H{"msg": "Temporary password sent to your email✅"})
 }
-
