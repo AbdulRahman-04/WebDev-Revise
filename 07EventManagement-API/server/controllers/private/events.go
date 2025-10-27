@@ -39,11 +39,10 @@ func CreateEvent(c *gin.Context) {
 	location := c.PostForm("location")
 
 	var (
-		imageUrl    string
-		uploadErr   error
-		insertErr   error
-		attendence  int
-		convertErr  error
+		imageUrl   string
+		uploadErr  error
+		attendence int
+		convertErr error
 	)
 
 	wg := sync.WaitGroup{}
@@ -51,6 +50,7 @@ func CreateEvent(c *gin.Context) {
 
 	go func() {
 		defer wg.Done()
+		// Background context so it doesn't get cancelled
 		imageUrl, uploadErr = utils.FileUpload(c)
 		if uploadErr != nil {
 			imageUrl = ""
@@ -63,8 +63,9 @@ func CreateEvent(c *gin.Context) {
 	}()
 
 	wg.Wait()
+
 	if convertErr != nil {
-		c.JSON(400, gin.H{"msg": "Conversion error"})
+		c.JSON(400, gin.H{"msg": "Attendance conversion error"})
 		return
 	}
 
@@ -83,9 +84,8 @@ func CreateEvent(c *gin.Context) {
 		UpdatedAt:        time.Now(),
 	}
 
-	_, insertErr = eventsCollection.InsertOne(ctx, newEvent)
-	if insertErr != nil {
-		c.JSON(400, gin.H{"msg": "DB error"})
+	if _, err := eventsCollection.InsertOne(ctx, newEvent); err != nil {
+		c.JSON(500, gin.H{"msg": "Failed to insert event into DB"})
 		return
 	}
 
@@ -109,8 +109,10 @@ func GetAllEvents(c *gin.Context) {
 	skip := (page - 1) * limit
 
 	cacheKey := fmt.Sprintf("events:%s:%d:%d", userId.Hex(), page, limit)
+
+	// Try from Redis cache first
 	if utils.RedisClient != nil {
-		if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
+		if cached, err := utils.RedisClient.Get(context.Background(), cacheKey).Result(); err == nil && cached != "" {
 			var cachedResponse struct {
 				Msg     string         `json:"msg"`
 				Events  []models.Event `json:"events"`
@@ -130,10 +132,10 @@ func GetAllEvents(c *gin.Context) {
 	}
 
 	var (
-		total      int64
-		allEvents  []models.Event
-		countErr   error
-		findErr    error
+		total     int64
+		allEvents []models.Event
+		countErr  error
+		findErr   error
 	)
 
 	wg := sync.WaitGroup{}
@@ -158,7 +160,7 @@ func GetAllEvents(c *gin.Context) {
 
 	wg.Wait()
 	if countErr != nil || findErr != nil {
-		c.JSON(400, gin.H{"msg": "DB error"})
+		c.JSON(500, gin.H{"msg": "Failed to fetch events"})
 		return
 	}
 
@@ -182,14 +184,14 @@ func GetAllEvents(c *gin.Context) {
 		Source:  "db",
 	}
 
-	go func() {
+	// Cache response safely in background
+	go func(resp any) {
 		if utils.RedisClient != nil {
-			cacheResp := response
-			cacheResp.Source = ""
-			dataBytes, _ := json.Marshal(cacheResp)
-			_ = utils.RedisClient.Set(ctx, cacheKey, dataBytes, 60*time.Second).Err()
+			cacheCtx := context.Background()
+			dataBytes, _ := json.Marshal(resp)
+			_ = utils.RedisClient.Set(cacheCtx, cacheKey, dataBytes, 60*time.Second).Err()
 		}
-	}()
+	}(response)
 
 	c.JSON(200, response)
 }
@@ -208,46 +210,36 @@ func GetOneEvent(c *gin.Context) {
 
 	cacheKey := fmt.Sprintf("event:%s:%s", userId.Hex(), mongoId.Hex())
 	var oneEvent models.Event
-	var redisErr, dbErr error
 
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		if utils.RedisClient != nil {
-			if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-				redisErr = json.Unmarshal([]byte(cached), &oneEvent)
+	// Try Redis first
+	if utils.RedisClient != nil {
+		if cached, err := utils.RedisClient.Get(context.Background(), cacheKey).Result(); err == nil && cached != "" {
+			if err := json.Unmarshal([]byte(cached), &oneEvent); err == nil {
+				c.JSON(200, gin.H{"msg": "Event from Redis✅", "event": oneEvent, "source": "redis"})
+				return
 			}
 		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		dbErr = eventsCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oneEvent)
-	}()
-
-	wg.Wait()
-
-	if redisErr == nil {
-		c.JSON(200, gin.H{"msg": "Event from Redis✅", "event": oneEvent, "source": "redis"})
-		return
 	}
-	if dbErr != nil {
+
+	// Fallback to MongoDB
+	if err := eventsCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oneEvent); err != nil {
 		c.JSON(404, gin.H{"msg": "No event found❌"})
 		return
 	}
 
-	go func() {
+	// Cache the event
+	go func(evt models.Event) {
 		if utils.RedisClient != nil {
-			dataBytes, _ := json.Marshal(oneEvent)
-			_ = utils.RedisClient.Set(ctx, cacheKey, dataBytes, 60*time.Second).Err()
+			cacheCtx := context.Background()
+			dataBytes, _ := json.Marshal(evt)
+			_ = utils.RedisClient.Set(cacheCtx, cacheKey, dataBytes, 60*time.Second).Err()
 		}
-	}()
+	}(oneEvent)
 
 	c.JSON(200, gin.H{"msg": "Event from DB✅", "event": oneEvent, "source": "db"})
 }
 
+// -------------------- EDIT EVENT --------------------
 func EditEventApi(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -261,7 +253,7 @@ func EditEventApi(c *gin.Context) {
 
 	var oldEvent models.Event
 	if err := eventsCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oldEvent); err != nil {
-		c.JSON(400, gin.H{"msg": "No event found to update"})
+		c.JSON(404, gin.H{"msg": "No event found to update"})
 		return
 	}
 
@@ -278,7 +270,6 @@ func EditEventApi(c *gin.Context) {
 		uploadErr  error
 		attendence int
 		convertErr error
-		updateErr  error
 	)
 
 	wg := sync.WaitGroup{}
@@ -288,7 +279,7 @@ func EditEventApi(c *gin.Context) {
 		defer wg.Done()
 		imageUrl, uploadErr = utils.FileUpload(c)
 		if uploadErr != nil {
-			imageUrl = ""
+			imageUrl = oldEvent.ImageUrl // retain old image if upload fails
 		}
 	}()
 
@@ -298,8 +289,9 @@ func EditEventApi(c *gin.Context) {
 	}()
 
 	wg.Wait()
+
 	if convertErr != nil {
-		c.JSON(400, gin.H{"msg": "Conversion error"})
+		c.JSON(400, gin.H{"msg": "Attendance conversion error"})
 		return
 	}
 
@@ -312,17 +304,27 @@ func EditEventApi(c *gin.Context) {
 		"status":     status,
 		"location":   location,
 		"imageUrl":   imageUrl,
-		"updated_at": time.Now(),
+		"updatedAt":  time.Now(),
 	}}
 
-	_, updateErr = eventsCollection.UpdateByID(ctx, mongoId, update)
-	if updateErr != nil {
-		c.JSON(400, gin.H{"msg": "DB error"})
+	if _, err := eventsCollection.UpdateByID(ctx, mongoId, update); err != nil {
+		c.JSON(500, gin.H{"msg": "Failed to update event"})
 		return
 	}
 
-	c.JSON(200, gin.H{"msg": "Event Updated Successfully!✅", "UpdatedEvent": oldEvent})
+	// Invalidate cache in background
+	go func() {
+		if utils.RedisClient != nil {
+			cacheCtx := context.Background()
+			cacheKey := fmt.Sprintf("event:%s:%s", userId.Hex(), mongoId.Hex())
+			_ = utils.RedisClient.Del(cacheCtx, cacheKey).Err()
+		}
+	}()
+
+	c.JSON(200, gin.H{"msg": "Event Updated Successfully!✅"})
 }
+
+// -------------------- DELETE ONE EVENT --------------------
 func DeleteOneEvent(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -334,44 +336,45 @@ func DeleteOneEvent(c *gin.Context) {
 		return
 	}
 
-	_, err = eventsCollection.DeleteOne(ctx, bson.M{"userId": userId, "_id": mongoId})
-	if err != nil {
-		c.JSON(400, gin.H{"msg": "No Event Found or userId mismatch"})
+	if _, err := eventsCollection.DeleteOne(ctx, bson.M{"userId": userId, "_id": mongoId}); err != nil {
+		c.JSON(404, gin.H{"msg": "No Event Found or userId mismatch"})
 		return
 	}
 
+	// Invalidate Redis cache
 	go func() {
-		cacheKey := fmt.Sprintf("event:%s:%s", userId.Hex(), mongoId.Hex())
 		if utils.RedisClient != nil {
-			_ = utils.RedisClient.Del(ctx, cacheKey).Err()
+			cacheCtx := context.Background()
+			cacheKey := fmt.Sprintf("event:%s:%s", userId.Hex(), mongoId.Hex())
+			_ = utils.RedisClient.Del(cacheCtx, cacheKey).Err()
 		}
 	}()
 
 	c.JSON(200, gin.H{"msg": "One Event is deleted✅"})
 }
 
+// -------------------- DELETE ALL EVENTS --------------------
 func DeleteAllEvents(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	userId := c.MustGet("userId").(primitive.ObjectID)
 
-	_, err := eventsCollection.DeleteMany(ctx, bson.M{"userId": userId})
-	if err != nil {
-		c.JSON(400, gin.H{"msg": "DB error"})
+	if _, err := eventsCollection.DeleteMany(ctx, bson.M{"userId": userId}); err != nil {
+		c.JSON(500, gin.H{"msg": "DB error"})
 		return
 	}
 
 	go func() {
 		if utils.RedisClient != nil {
+			cacheCtx := context.Background()
 			pattern := fmt.Sprintf("event:%s:*", userId.Hex())
-			iter := utils.RedisClient.Scan(ctx, 0, pattern, 0).Iterator()
-			for iter.Next(ctx) {
-				_ = utils.RedisClient.Del(ctx, iter.Val()).Err()
+			iter := utils.RedisClient.Scan(cacheCtx, 0, pattern, 0).Iterator()
+			for iter.Next(cacheCtx) {
+				_ = utils.RedisClient.Del(cacheCtx, iter.Val()).Err()
 			}
 		}
 	}()
 
 	c.JSON(200, gin.H{"msg": "All Events Deleted✅"})
 }
-
