@@ -39,3 +39,5 @@ func RedisGet(key string) (string, error) {
 func RedisDel(key string) error {
 	return RedisClient.Del(Ctx, key).Err()
 }
+
+
