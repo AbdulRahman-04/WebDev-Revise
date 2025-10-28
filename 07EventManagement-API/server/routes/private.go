@@ -44,7 +44,7 @@ func PrivateRoutes(r *gin.Engine) {
 		// ==========================
 		// 🔹 Admin Routes
 		// ==========================
-		privateGroup.GET("/admins/getallevents", middleware.OnlyAdmins(), private.GetAllEventsAdmin)
+		privateGroup.GET("/admins/getallevents", middleware.OnlyAdmins(), private.AdminGetAllEvents)
 		privateGroup.GET("/admins/getone/:id", middleware.OnlyAdmins(), private.GetOneEventAdmin)
 		privateGroup.GET("/admins/getallusers", middleware.OnlyAdmins(), private.GetAllUsersAdmin)
 		privateGroup.GET("/admins/getoneuser/:id", middleware.OnlyAdmins(), private.GetOneUserAdmin)
