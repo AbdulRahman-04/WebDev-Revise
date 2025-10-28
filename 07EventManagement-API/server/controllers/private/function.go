@@ -45,6 +45,7 @@ func CreateFunction(c *gin.Context) {
 		FuncType:  funcType,
 		FuncDesc:  funcDesc,
 		IsPublic:  isPublic,
+		ImageUrl: imageUrl,
 		Status:    status,
 		Location:  location,
 		CreatedAt: time.Now(),
@@ -244,10 +245,11 @@ func EditFunction(c *gin.Context) {
 
 	var oldFunc models.Function
 	if err := functionCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oldFunc); err != nil {
-		c.JSON(400, gin.H{"msg": "No function found to update"})
+		c.JSON(404, gin.H{"msg": "No function found"})
 		return
 	}
 
+	// fields
 	funcName := c.PostForm("funcname")
 	funcType := c.PostForm("functype")
 	funcDesc := c.PostForm("funcdes")
@@ -255,22 +257,32 @@ func EditFunction(c *gin.Context) {
 	status := c.PostForm("status")
 	location := c.PostForm("location")
 
-	var imageUrl string
-	var uploadErr, updateErr error
+	// Channels for concurrency
+	imageCh := make(chan string, 1)
+	errCh := make(chan error, 2)
+	done := make(chan struct{})
 
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
+	// 🔹 1. Upload Image (if exists)
 	go func() {
-		defer wg.Done()
-		imageUrl, uploadErr = utils.FileUpload(c)
-		if uploadErr != nil {
-			imageUrl = ""
+		defer close(imageCh)
+		file, _ := c.FormFile("file")
+		if file == nil {
+			imageCh <- oldFunc.ImageUrl // keep old if not uploaded
+			return
 		}
+		path, err := utils.FileUpload(c)
+		if err != nil {
+			errCh <- err
+			imageCh <- oldFunc.ImageUrl
+			return
+		}
+		imageCh <- path
 	}()
 
+	// 🔹 2. Update DB concurrently after image upload finishes
 	go func() {
-		defer wg.Done()
+		imageUrl := <-imageCh // wait for upload result
+
 		update := bson.M{"$set": bson.M{
 			"funcname":  funcName,
 			"functype":  funcType,
@@ -281,44 +293,72 @@ func EditFunction(c *gin.Context) {
 			"imageUrl":  imageUrl,
 			"updatedAt": time.Now(),
 		}}
+
 		setMap := update["$set"].(bson.M)
 		for k, v := range setMap {
 			if s, ok := v.(string); ok && s == "" {
 				delete(setMap, k)
 			}
 		}
-		_, updateErr = functionCollection.UpdateByID(ctx, oldFunc.ID, update)
-	}()
 
-	wg.Wait()
+		if _, err := functionCollection.UpdateByID(ctx, oldFunc.ID, update); err != nil {
+			errCh <- err
+			close(done)
+			return
+		}
 
-	if updateErr != nil {
-		c.JSON(400, gin.H{"msg": "DB error"})
-		return
-	}
-
-	var updated models.Function
-	if err := functionCollection.FindOne(ctx, bson.M{"_id": oldFunc.ID}).Decode(&updated); err != nil {
-		c.JSON(400, gin.H{"msg": "DB error fetching updated document"})
-		return
-	}
-
-	go func() {
-		rctx := context.Background()
-		if utils.RedisClient != nil {
-			cacheKey := fmt.Sprintf("function:%s:%s", userId.Hex(), oldFunc.ID.Hex())
-			_ = utils.RedisClient.Del(rctx, cacheKey).Err()
-
-			pattern := fmt.Sprintf("function_list:%s:*", userId.Hex())
-			iter := utils.RedisClient.Scan(rctx, 0, pattern, 0).Iterator()
-			for iter.Next(rctx) {
-				_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
+		// merge new values into oldFunc for response
+		for k, v := range setMap {
+			switch k {
+			case "funcname":
+				oldFunc.FuncName = v.(string)
+			case "functype":
+				oldFunc.FuncType = v.(string)
+			case "funcdes":
+				oldFunc.FuncDesc = v.(string)
+			case "ispublic":
+				oldFunc.IsPublic = v.(string)
+			case "status":
+				oldFunc.Status = v.(string)
+			case "location":
+				oldFunc.Location = v.(string)
+			case "imageUrl":
+				oldFunc.ImageUrl = v.(string)
 			}
 		}
+		oldFunc.UpdatedAt = time.Now()
+
+		// ✅ 3. Clear Redis Cache (async)
+		go func() {
+			rctx := context.Background()
+			if utils.RedisClient != nil {
+				cacheKey := fmt.Sprintf("function:%s:%s", userId.Hex(), oldFunc.ID.Hex())
+				_ = utils.RedisClient.Del(rctx, cacheKey).Err()
+
+				iter := utils.RedisClient.Scan(rctx, 0, fmt.Sprintf("function_list:%s:*", userId.Hex()), 0).Iterator()
+				for iter.Next(rctx) {
+					_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
+				}
+			}
+		}()
+
+		close(done)
 	}()
 
-	c.JSON(200, gin.H{"msg": "Function Updated Successfully!✅", "updatedFunction": updated})
+	select {
+	case <-done:
+		c.JSON(200, gin.H{
+			"msg":              "Function Updated Successfully ✅",
+			"updatedFunction":  oldFunc,
+			"response_time_ms": "Fast concurrent update",
+		})
+	case e := <-errCh:
+		c.JSON(500, gin.H{"msg": "Error during update", "err": e.Error()})
+	case <-ctx.Done():
+		c.JSON(504, gin.H{"msg": "Request timed out"})
+	}
 }
+
 
 func DeleteOneFunction(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

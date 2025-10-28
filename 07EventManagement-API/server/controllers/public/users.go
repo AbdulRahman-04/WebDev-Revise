@@ -44,7 +44,7 @@ func UserSignUp(c *gin.Context) {
 	defer cancel()
 
 	type UserSignUp struct {
-		UserName string `json:"name" form:"name"`
+		UserName string `json:"username" form:"username"`
 		Email    string `json:"email" form:"email"`
 		Password string `json:"password" form:"password"`
 		Phone    string `json:"phone" form:"phone"`

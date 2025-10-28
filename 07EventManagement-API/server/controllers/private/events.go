@@ -23,7 +23,6 @@ func EventsCollect() {
 	eventsCollection = utils.MongoClient.Database("Event_Booking").Collection("events")
 }
 
-// -------------------- CREATE EVENT --------------------
 func CreateEvent(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -48,15 +47,16 @@ func CreateEvent(c *gin.Context) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
+	// 1️⃣ File upload goroutine
 	go func() {
 		defer wg.Done()
-		// Background context so it doesn't get cancelled
 		imageUrl, uploadErr = utils.FileUpload(c)
 		if uploadErr != nil {
-			imageUrl = ""
+			imageUrl = "" // default if upload fails
 		}
 	}()
 
+	// 2️⃣ Attendance string → int convert concurrently
 	go func() {
 		defer wg.Done()
 		attendence, convertErr = strconv.Atoi(eventAttendenceStr)
@@ -69,6 +69,7 @@ func CreateEvent(c *gin.Context) {
 		return
 	}
 
+	// ✅ Now insert into MongoDB after upload done
 	newEvent := models.Event{
 		ID:               primitive.NewObjectID(),
 		UserId:           userId,
@@ -88,6 +89,18 @@ func CreateEvent(c *gin.Context) {
 		c.JSON(500, gin.H{"msg": "Failed to insert event into DB"})
 		return
 	}
+
+	// 🧠 Async Redis cache invalidation
+	go func() {
+		rctx := context.Background()
+		if utils.RedisClient != nil {
+			pattern := fmt.Sprintf("events:%s:*", userId.Hex())
+			iter := utils.RedisClient.Scan(rctx, 0, pattern, 0).Iterator()
+			for iter.Next(rctx) {
+				_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
+			}
+		}
+	}()
 
 	c.JSON(200, gin.H{"msg": "New Event Created✨", "eventDetails": newEvent})
 }
