@@ -23,7 +23,7 @@ func UserAccessCollect() {
 }
 
 // ====================================================
-// ⚡ Get All Users (Concurrent + Redis + Pagination)
+// ⚡ Get All Users (Fast + Redis + Pagination)
 // ====================================================
 func GetAllUsers(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -37,7 +37,6 @@ func GetAllUsers(c *gin.Context) {
 	if limit < 1 {
 		limit = 10
 	}
-
 	skip := (page - 1) * limit
 	cacheKey := fmt.Sprintf("user_list:page:%d:limit:%d", page, limit)
 
@@ -46,43 +45,31 @@ func GetAllUsers(c *gin.Context) {
 		Total int64         `json:"total"`
 	}
 
-	// ✅ Concurrent Redis read
-	dataCh := make(chan *CachedData, 1)
-	go func() {
-		defer close(dataCh)
-		if utils.RedisClient != nil {
-			if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-				var payload CachedData
-				if jerr := json.Unmarshal([]byte(cached), &payload); jerr == nil {
-					dataCh <- &payload
-					return
-				}
+	// ✅ Try Redis cache first
+	if utils.RedisClient != nil {
+		if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
+			var payload CachedData
+			if err := json.Unmarshal([]byte(cached), &payload); err == nil {
+				c.JSON(200, gin.H{
+					"msg":    "All Users (from Redis Cache)✨",
+					"users":  payload.Users,
+					"total":  payload.Total,
+					"page":   page,
+					"limit":  limit,
+					"source": "redis",
+				})
+				return
 			}
 		}
-		dataCh <- nil
-	}()
-
-	// Wait 50ms for Redis response max
-	select {
-	case payload := <-dataCh:
-		if payload != nil {
-			c.JSON(200, gin.H{
-				"msg":    "All Users (from Redis Cache)✨",
-				"users":  payload.Users,
-				"total":  payload.Total,
-				"page":   page,
-				"limit":  limit,
-				"source": "redis",
-			})
-			return
-		}
-	case <-time.After(50 * time.Millisecond):
-		// timeout, fallback to DB
 	}
 
 	// ✅ Fetch from MongoDB
 	var users []models.User
-	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetSort(bson.D{{Key: "createdat", Value: -1}})
+	opts := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "createdat", Value: -1}}).
+		SetBatchSize(20)
 	cursor, err := userCollection.Find(ctx, bson.M{}, opts)
 	if err != nil {
 		c.JSON(500, gin.H{"msg": "Database error❌"})
@@ -94,17 +81,16 @@ func GetAllUsers(c *gin.Context) {
 	}
 	total, _ := userCollection.CountDocuments(ctx, bson.M{})
 
-	// ✅ Concurrent Redis cache write
-	go func(users []models.User, total int64) {
-		if utils.RedisClient == nil {
-			return
-		}
-		rctx := context.Background()
-		payload := CachedData{Users: users, Total: total}
-		if b, err := json.Marshal(payload); err == nil {
-			_ = utils.RedisClient.Set(rctx, cacheKey, b, 12*time.Hour).Err()
-		}
-	}(users, total)
+	// ✅ Cache result asynchronously
+	if utils.RedisClient != nil {
+		go func(users []models.User, total int64) {
+			rctx := context.Background()
+			payload := CachedData{Users: users, Total: total}
+			if b, err := json.Marshal(payload); err == nil {
+				_ = utils.RedisClient.Set(rctx, cacheKey, b, 12*time.Hour).Err()
+			}
+		}(users, total)
+	}
 
 	c.JSON(200, gin.H{
 		"msg":    "All Users (from DB)✨",
@@ -117,7 +103,7 @@ func GetAllUsers(c *gin.Context) {
 }
 
 // ====================================================
-// ⚡ Get One User (Concurrent + Redis Cache)
+// ⚡ Get One User (Fast + Redis Cache)
 // ====================================================
 func GetOneUser(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -129,57 +115,41 @@ func GetOneUser(c *gin.Context) {
 		c.JSON(400, gin.H{"msg": "Invalid user ID❌"})
 		return
 	}
-
 	cacheKey := fmt.Sprintf("user:%s", mongoId.Hex())
-	dataCh := make(chan *models.User, 1)
 
-	// ✅ Concurrent Redis read
-	go func() {
-		defer close(dataCh)
-		if utils.RedisClient != nil {
-			if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-				var u models.User
-				if jerr := json.Unmarshal([]byte(cached), &u); jerr == nil {
-					dataCh <- &u
-					return
-				}
+	// ✅ Try Redis first
+	if utils.RedisClient != nil {
+		if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
+			var user models.User
+			if err := json.Unmarshal([]byte(cached), &user); err == nil {
+				c.JSON(200, gin.H{"msg": "User from Redis✅", "user": user, "source": "redis"})
+				return
 			}
 		}
-		dataCh <- nil
-	}()
-
-	select {
-	case cachedUser := <-dataCh:
-		if cachedUser != nil {
-			c.JSON(200, gin.H{"msg": "User from Redis✅", "user": cachedUser, "source": "redis"})
-			return
-		}
-	case <-time.After(50 * time.Millisecond):
 	}
 
-	// ✅ MongoDB fallback
+	// ✅ Fallback: MongoDB
 	var user models.User
 	if err := userCollection.FindOne(ctx, bson.M{"_id": mongoId}).Decode(&user); err != nil {
 		c.JSON(404, gin.H{"msg": "User not found❌"})
 		return
 	}
 
-	// ✅ Concurrent Redis cache write
-	go func(user models.User) {
-		if utils.RedisClient == nil {
-			return
-		}
-		rctx := context.Background()
-		if b, err := json.Marshal(user); err == nil {
-			_ = utils.RedisClient.Set(rctx, cacheKey, b, 12*time.Hour).Err()
-		}
-	}(user)
+	// ✅ Cache async
+	if utils.RedisClient != nil {
+		go func(user models.User) {
+			rctx := context.Background()
+			if b, err := json.Marshal(user); err == nil {
+				_ = utils.RedisClient.Set(rctx, cacheKey, b, 12*time.Hour).Err()
+			}
+		}(user)
+	}
 
 	c.JSON(200, gin.H{"msg": "User from DB✅", "user": user, "source": "db"})
 }
 
 // ====================================================
-// ⚡ Edit User (Invalidate Cache Concurrently)
+// ⚡ Edit User (Invalidate Redis Async)
 // ====================================================
 func EditUser(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -221,24 +191,23 @@ func EditUser(c *gin.Context) {
 		return
 	}
 
-	// ✅ Invalidate Redis (async)
-	go func(id primitive.ObjectID) {
-		if utils.RedisClient == nil {
-			return
-		}
-		rctx := context.Background()
-		_ = utils.RedisClient.Del(rctx, fmt.Sprintf("user:%s", id.Hex())).Err()
-		iter := utils.RedisClient.Scan(rctx, 0, "user_list:*", 0).Iterator()
-		for iter.Next(rctx) {
-			_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
-		}
-	}(mongoId)
+	// ✅ Invalidate Redis (background)
+	if utils.RedisClient != nil {
+		go func(id primitive.ObjectID) {
+			rctx := context.Background()
+			_ = utils.RedisClient.Del(rctx, fmt.Sprintf("user:%s", id.Hex())).Err()
+			iter := utils.RedisClient.Scan(rctx, 0, "user_list:*", 0).Iterator()
+			for iter.Next(rctx) {
+				_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
+			}
+		}(mongoId)
+	}
 
 	c.JSON(200, gin.H{"msg": "Profile Updated Successfully✅", "updated": updateFields})
 }
 
 // ====================================================
-// ⚡ Delete User (Invalidate Redis Concurrently)
+// ⚡ Delete User (Invalidate Redis Async)
 // ====================================================
 func DeleteOneUser(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -263,17 +232,17 @@ func DeleteOneUser(c *gin.Context) {
 		return
 	}
 
-	go func(id primitive.ObjectID) {
-		if utils.RedisClient == nil {
-			return
-		}
-		rctx := context.Background()
-		_ = utils.RedisClient.Del(rctx, fmt.Sprintf("user:%s", id.Hex())).Err()
-		iter := utils.RedisClient.Scan(rctx, 0, "user_list:*", 0).Iterator()
-		for iter.Next(rctx) {
-			_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
-		}
-	}(mongoId)
+	// ✅ Invalidate Redis (background)
+	if utils.RedisClient != nil {
+		go func(id primitive.ObjectID) {
+			rctx := context.Background()
+			_ = utils.RedisClient.Del(rctx, fmt.Sprintf("user:%s", id.Hex())).Err()
+			iter := utils.RedisClient.Scan(rctx, 0, "user_list:*", 0).Iterator()
+			for iter.Next(rctx) {
+				_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
+			}
+		}(mongoId)
+	}
 
 	c.JSON(200, gin.H{"msg": "User Deleted Successfully💔"})
 }
@@ -311,12 +280,13 @@ func UserLogout(c *gin.Context) {
 		return
 	}
 
-	go func(id primitive.ObjectID) {
-		if utils.RedisClient != nil {
+	// ✅ Remove Redis cache (background)
+	if utils.RedisClient != nil {
+		go func(id primitive.ObjectID) {
 			rctx := context.Background()
 			_ = utils.RedisClient.Del(rctx, "user:"+id.Hex()).Err()
-		}
-	}(user.ID)
+		}(user.ID)
+	}
 
 	c.JSON(200, gin.H{"msg": "User logged out successfully ✅"})
 }
