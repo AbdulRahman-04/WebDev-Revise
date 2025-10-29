@@ -26,7 +26,7 @@ func PrivateRoutes(r *gin.Engine) {
 		// 🔹 User Routes (Users)
 		// ==========================
 		privateGroup.GET("/users/getall", middleware.OnlyUsers(), middleware.RateLimitMiddleware(10), private.GetAllUsers)
-		privateGroup.GET("/users/getone/:id", middleware.OnlyUsers(), middleware.RateLimitMiddleware(10), private.GetOneUser)
+		privateGroup.GET("/users/me", middleware.OnlyUsers(), middleware.RateLimitMiddleware(10), private.GetMyProfile)
 		privateGroup.PUT("/users/edit/:id", middleware.OnlyUsers(), middleware.RateLimitMiddleware(5), private.EditUser)
 		privateGroup.DELETE("/users/delete/:id", middleware.OnlyUsers(), middleware.RateLimitMiddleware(5), private.DeleteOneUser)
 		privateGroup.POST("/users/logout", middleware.OnlyUsers(), private.UserLogout)

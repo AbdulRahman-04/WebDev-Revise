@@ -103,26 +103,25 @@ func GetAllUsers(c *gin.Context) {
 }
 
 // ====================================================
-// ⚡ Get One User (Fast + Redis Cache)
+// ⚡ Get My Profile (via Token, Fast + Redis Cache)
 // ====================================================
-func GetOneUser(c *gin.Context) {
+func GetMyProfile(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	paramId := c.Param("id")
-	mongoId, err := primitive.ObjectIDFromHex(paramId)
-	if err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid user ID❌"})
-		return
-	}
-	cacheKey := fmt.Sprintf("user:%s", mongoId.Hex())
+	userId := c.MustGet("userId").(primitive.ObjectID)
+	cacheKey := fmt.Sprintf("user:%s", userId.Hex())
 
-	// ✅ Try Redis first
+	// ✅ Try Redis cache first
 	if utils.RedisClient != nil {
 		if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
 			var user models.User
 			if err := json.Unmarshal([]byte(cached), &user); err == nil {
-				c.JSON(200, gin.H{"msg": "User from Redis✅", "user": user, "source": "redis"})
+				c.JSON(200, gin.H{
+					"msg":    "Profile fetched successfully (from Redis)✨",
+					"user":   user,
+					"source": "redis",
+				})
 				return
 			}
 		}
@@ -130,12 +129,12 @@ func GetOneUser(c *gin.Context) {
 
 	// ✅ Fallback: MongoDB
 	var user models.User
-	if err := userCollection.FindOne(ctx, bson.M{"_id": mongoId}).Decode(&user); err != nil {
+	if err := userCollection.FindOne(ctx, bson.M{"_id": userId}).Decode(&user); err != nil {
 		c.JSON(404, gin.H{"msg": "User not found❌"})
 		return
 	}
 
-	// ✅ Cache async
+	// ✅ Cache asynchronously
 	if utils.RedisClient != nil {
 		go func(user models.User) {
 			rctx := context.Background()
@@ -145,8 +144,14 @@ func GetOneUser(c *gin.Context) {
 		}(user)
 	}
 
-	c.JSON(200, gin.H{"msg": "User from DB✅", "user": user, "source": "db"})
+	c.JSON(200, gin.H{
+		"msg":    "Profile fetched successfully (from DB)✅",
+		"user":   user,
+		"source": "db",
+	})
 }
+
+
 
 // ====================================================
 // ⚡ Edit User (Invalidate Redis Async)

@@ -15,7 +15,7 @@ func PublicRoutes(r*gin.Engine){
 	publicGroup.POST("/users/signup", public.UserSignUp)
 	publicGroup.POST("/users/signin", public.UserSignIn)
 	publicGroup.GET("/user/emailverify/:token", public.EmailVerifyUser)
-	publicGroup.POST("/users/change-password", public.UserChangePass)
+	// publicGroup.POST("/users/change-password", public.UserChangePass)
 	publicGroup.POST("/users/forgot-password", public.ForgotPass)
 
 	// admins
