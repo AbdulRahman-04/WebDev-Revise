@@ -1,5 +1,13 @@
 package config
 
+import (
+	"log"
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
 type Config struct {
 	AppName string
 	Port    int
@@ -8,7 +16,7 @@ type Config struct {
 	JWTKEY  string
 	Email   EmailConfig
 	Phone   PhoneConfig
-	Redis   RedisConfig // 🔥 add this
+	Redis   RedisConfig
 }
 
 type EmailConfig struct {
@@ -22,30 +30,51 @@ type PhoneConfig struct {
 	Phone string
 }
 
-type RedisConfig struct { // 🔥 add this
+type RedisConfig struct {
 	Host     string
 	Password string
 	DB       int
 }
 
-var AppConfig = &Config{
-	AppName: "Event_Booking",
-	Port:    4040,
-	DBURI:   "mongodb+srv://abdrahman:abdrahman@rahmann18.hy9zl.mongodb.net/Event_Booking",
-	URL:     "http://localhost:4040",
-	JWTKEY:  "RAHMAN123",
-	Email: EmailConfig{
-		User: "abdulrahman.81869@gmail.com",
-		Pass: "erkg pyjg sbwn fhta",
-	},
-	Phone: PhoneConfig{
-		Sid:   "your_twilio_sid_here",
-		Token: "your_twilio_token_here",
-		Phone: "+1234567890",
-	},
-	Redis: RedisConfig{ // 🔥 add this
-		Host:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	},
+var AppConfig *Config
+
+func init() {
+	// ✅ Load .env
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️ No .env file found")
+	}
+
+	AppConfig = &Config{
+		AppName: os.Getenv("APP_NAME"),
+		Port:    getEnvAsInt("PORT", 4040),
+		DBURI:   os.Getenv("MONGO_URI"),
+		URL:     os.Getenv("BASE_URL"),
+		JWTKEY:  os.Getenv("JWT_KEY"),
+		Email: EmailConfig{
+			User: os.Getenv("EMAIL_USER"),
+			Pass: os.Getenv("EMAIL_PASS"),
+		},
+		Phone: PhoneConfig{
+			Sid:   os.Getenv("TWILIO_SID"),
+			Token: os.Getenv("TWILIO_TOKEN"),
+			Phone: os.Getenv("TWILIO_PHONE"),
+		},
+		Redis: RedisConfig{
+			Host:     os.Getenv("REDIS_HOST"),
+			Password: os.Getenv("REDIS_PASS"),
+			DB:       getEnvAsInt("REDIS_DB", 0),
+		},
+	}
+}
+
+func getEnvAsInt(key string, defaultVal int) int {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return defaultVal
+	}
+	val, err := strconv.Atoi(valStr)
+	if err != nil {
+		return defaultVal
+	}
+	return val
 }
