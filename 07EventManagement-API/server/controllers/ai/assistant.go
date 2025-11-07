@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/models"
@@ -13,132 +14,195 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// 🚀 Industry-grade personalized AI recommendation engine
 func RecommendAI(c *gin.Context) {
-	var events []models.Event
-	var functions []models.Function
-
-	eventColl := utils.MongoClient.Database("Event_Booking").Collection("events")
-	funcColl := utils.MongoClient.Database("Event_Booking").Collection("functions")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	eventCursor, err := eventColl.Find(ctx, bson.M{})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to fetch events"})
+	userId := c.MustGet("userId").(primitive.ObjectID)
+	db := utils.MongoClient.Database("Event_Booking")
+
+	eventColl := db.Collection("events")
+	funcColl := db.Collection("functions")
+	joinColl := db.Collection("join_requests")
+
+	var (
+		allEvents     []models.Event
+		allFunctions  []models.Function
+		userJoinReqs  []models.JoinRequest
+		wg            sync.WaitGroup
+		eventErr      error
+		funcErr       error
+		joinErr       error
+	)
+
+	// 🧵 Concurrent fetching for performance
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		// fetch both public and private for better recommendation context
+		cursor, err := eventColl.Find(ctx, bson.M{
+			"$or": []bson.M{
+				{"ispublic": "public"},
+				{"ispublic": "private"},
+			},
+		})
+		if err != nil {
+			eventErr = err
+			return
+		}
+		defer cursor.Close(ctx)
+		_ = cursor.All(ctx, &allEvents)
+	}()
+	go func() {
+		defer wg.Done()
+		cursor, err := funcColl.Find(ctx, bson.M{
+			"$or": []bson.M{
+				{"ispublic": "public"},
+				{"ispublic": "private"},
+			},
+		})
+		if err != nil {
+			funcErr = err
+			return
+		}
+		defer cursor.Close(ctx)
+		_ = cursor.All(ctx, &allFunctions)
+	}()
+	go func() {
+		defer wg.Done()
+		cursor, err := joinColl.Find(ctx, bson.M{"requesterId": userId, "status": "accepted"})
+		if err != nil {
+			joinErr = err
+			return
+		}
+		defer cursor.Close(ctx)
+		_ = cursor.All(ctx, &userJoinReqs)
+	}()
+	wg.Wait()
+
+	if eventErr != nil || funcErr != nil || joinErr != nil {
+		c.JSON(500, gin.H{"error": "DB fetch failed"})
 		return
 	}
-	_ = eventCursor.All(ctx, &events)
 
-	funcCursor, err := funcColl.Find(ctx, bson.M{})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to fetch functions"})
-		return
+	// ⚙️ Extract joined event and function names for personalization
+	var joinedEventNames, joinedFuncNames []string
+	for _, j := range userJoinReqs {
+		if !j.EventID.IsZero() {
+			var evt models.Event
+			if err := eventColl.FindOne(ctx, bson.M{"_id": j.EventID}).Decode(&evt); err == nil {
+				joinedEventNames = append(joinedEventNames, evt.EventName)
+			}
+		}
+		if j.FunctionID != nil {
+			var fn models.Function
+			if err := funcColl.FindOne(ctx, bson.M{"_id": *j.FunctionID}).Decode(&fn); err == nil {
+				joinedFuncNames = append(joinedFuncNames, fn.FuncName)
+			}
+		}
 	}
-	_ = funcCursor.All(ctx, &functions)
 
-	if len(events) == 0 && len(functions) == 0 {
-		c.JSON(200, gin.H{"message": "No events or functions found in DB"})
-		return
-	}
+	// 🧩 Create user profile context for AI
+	userProfile := fmt.Sprintf(`
+	User ID: %s
+	Joined Events: %v
+	Joined Functions: %v
+	`, userId.Hex(), joinedEventNames, joinedFuncNames)
 
-	// Prepare data text for AI
+	// 🧾 Prepare dataset for AI
 	var eventList, funcList string
-	for _, e := range events {
-		eventList += fmt.Sprintf("- %s (%s) at %s\n", e.EventName, e.EventtType, e.Location)
+	for _, e := range allEvents {
+		eventList += fmt.Sprintf("- %s (%s) at %s [%s]\n", e.EventName, e.EventtType, e.Location, e.IsPublic)
 	}
-	for _, f := range functions {
-		funcList += fmt.Sprintf("- %s (%s) at %s\n", f.FuncName, f.FuncType, f.Location)
+	for _, f := range allFunctions {
+		funcList += fmt.Sprintf("- %s (%s) at %s [%s]\n", f.FuncName, f.FuncType, f.Location, f.IsPublic)
 	}
 
-	// 🧠 Prompt
+	// 🧠 Smart prompt to AI
 	prompt := fmt.Sprintf(`
-You are an intelligent event recommendation system.
+	You are an advanced event recommendation AI.
 
-Here are all events and functions in the database:
-EVENTS:
-%s
-FUNCTIONS:
-%s
+	User Profile:
+	%s
 
-Recommend 5 events and 5 functions (only from above list).
-Respond in pure JSON (no markdown, no code):
-{
-  "recommendedEvents": ["Event1", "Event2", "Event3", "Event4", "Event5"],
-  "recommendedFunctions": ["Func1", "Func2", "Func3", "Func4", "Func5"]
-}
-`, eventList, funcList)
+	Available Events:
+	%s
 
+	Available Functions:
+	%s
+
+	Recommend the top 5 events and 5 functions this user would most likely attend.
+	Return pure JSON only, no markdown:
+	{
+	"recommendedEvents": [{"name": "...", "reason": "..."}],
+	"recommendedFunctions": [{"name": "...", "reason": "..."}]
+	}
+	`, userProfile, eventList, funcList)
+
+	// 🔮 AI response
 	result, err := utils.GenerateAIResponse(prompt)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "AI failed to generate recommendations"})
 		return
 	}
 
-	// Extract names
-	var recEvents []string
-	var recFuncs []string
-
+	// 🧾 Extract AI data safely
+	var recEventsRaw, recFuncsRaw []map[string]interface{}
 	if evs, ok := result["recommendedEvents"].([]interface{}); ok {
 		for _, e := range evs {
-			if str, ok := e.(string); ok && str != "" {
-				recEvents = append(recEvents, strings.TrimSpace(str))
+			if m, ok := e.(map[string]interface{}); ok {
+				recEventsRaw = append(recEventsRaw, m)
 			}
 		}
 	}
 	if funcs, ok := result["recommendedFunctions"].([]interface{}); ok {
 		for _, f := range funcs {
-			if str, ok := f.(string); ok && str != "" {
-				recFuncs = append(recFuncs, strings.TrimSpace(str))
+			if m, ok := f.(map[string]interface{}); ok {
+				recFuncsRaw = append(recFuncsRaw, m)
 			}
 		}
 	}
 
-	// ✅ Use maps to avoid duplicates
-	uniqueEventIDs := make(map[string]bool)
-	uniqueFuncIDs := make(map[string]bool)
-
-	var finalEvents []models.Event
-	for _, name := range recEvents {
-		clean := strings.Split(name, "(")[0]
-		clean = strings.Split(clean, "at")[0]
-		clean = strings.TrimSpace(clean)
-
+	// 🧩 Build final detailed recommendations
+	var finalEvents []gin.H
+	for _, item := range recEventsRaw {
+		name := strings.TrimSpace(fmt.Sprintf("%v", item["name"]))
+		reason := strings.TrimSpace(fmt.Sprintf("%v", item["reason"]))
 		var evt models.Event
-		err := eventColl.FindOne(ctx, bson.M{
-			"eventname": bson.M{"$regex": clean, "$options": "i"},
-		}).Decode(&evt)
-
-		if err == nil && evt.ID != primitive.NilObjectID {
-			if !uniqueEventIDs[evt.ID.Hex()] {
-				finalEvents = append(finalEvents, evt)
-				uniqueEventIDs[evt.ID.Hex()] = true
-			}
+		if err := eventColl.FindOne(ctx, bson.M{"eventname": bson.M{"$regex": name, "$options": "i"}}).Decode(&evt); err == nil {
+			finalEvents = append(finalEvents, gin.H{
+				"eventname": evt.EventName,
+				"location":  evt.Location,
+				"status":    evt.Status,
+				"ispublic":  evt.IsPublic,
+				"image":     evt.ImageUrl,
+				"reason":    reason,
+			})
 		}
 	}
 
-	var finalFuncs []models.Function
-	for _, name := range recFuncs {
-		clean := strings.Split(name, "(")[0]
-		clean = strings.Split(clean, "at")[0]
-		clean = strings.TrimSpace(clean)
-
+	var finalFuncs []gin.H
+	for _, item := range recFuncsRaw {
+		name := strings.TrimSpace(fmt.Sprintf("%v", item["name"]))
+		reason := strings.TrimSpace(fmt.Sprintf("%v", item["reason"]))
 		var fn models.Function
-		err := funcColl.FindOne(ctx, bson.M{
-			"funcname": bson.M{"$regex": clean, "$options": "i"},
-		}).Decode(&fn)
-
-		if err == nil && fn.ID != primitive.NilObjectID {
-			if !uniqueFuncIDs[fn.ID.Hex()] {
-				finalFuncs = append(finalFuncs, fn)
-				uniqueFuncIDs[fn.ID.Hex()] = true
-			}
+		if err := funcColl.FindOne(ctx, bson.M{"funcname": bson.M{"$regex": name, "$options": "i"}}).Decode(&fn); err == nil {
+			finalFuncs = append(finalFuncs, gin.H{
+				"funcname": fn.FuncName,
+				"location": fn.Location,
+				"status":   fn.Status,
+				"ispublic": fn.IsPublic,
+				"image":    fn.ImageUrl,
+				"reason":   reason,
+			})
 		}
 	}
 
-	// ✅ Return clean response
+	// ✅ Final clean JSON response
 	c.JSON(200, gin.H{
-		"type": "recommendations",
+		"type": "personalized_recommendations",
+		"user": userId.Hex(),
 		"data": gin.H{
 			"recommendedEvents":    finalEvents,
 			"recommendedFunctions": finalFuncs,
