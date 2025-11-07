@@ -65,6 +65,9 @@ func init() {
 			DB:       getEnvAsInt("REDIS_DB", 0),
 		},
 	}
+
+		// ✅ Add this line for debugging
+	log.Println("✅ Loaded GEMINI_API_KEY:", os.Getenv("GEMINI_API_KEY"))
 }
 
 func getEnvAsInt(key string, defaultVal int) int {

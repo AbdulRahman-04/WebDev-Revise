@@ -22,7 +22,7 @@ func PublicRoutes(r*gin.Engine){
 	publicGroup.POST("/admins/signup", public.AdminSignUp)
 	publicGroup.POST("/admins/signin", public.AdminSignIn)
 	publicGroup.GET("/admin/emailverify/:token", public.EmailVerifyAdmin)
-	publicGroup.POST("/admins/change-password", public.AdminChangePass)
+	// publicGroup.POST("/admins/change-password", public.AdminForgotPass)
 	publicGroup.POST("/admins/forgot-password", public.AdminForgotPass)
 
 	

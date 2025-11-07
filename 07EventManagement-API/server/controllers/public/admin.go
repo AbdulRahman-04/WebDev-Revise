@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/config"
@@ -25,26 +26,28 @@ func AdminCollect() {
 	adminCollection = utils.MongoClient.Database("Event_Booking").Collection("admin")
 }
 
-// jwt key and url
-var adminJwtKey = []byte(config.AppConfig.JWTKEY)
-var adminUrl = config.AppConfig.URL
+var (
+	adminJwtKey = []byte(config.AppConfig.JWTKEY)
+	adminUrl    = config.AppConfig.URL
+)
 
-// generate token func
-func GenerateToken(length int) string {
+func GenerateAdminToken(length int) string {
 	d := make([]byte, length)
 	_, _ = rand.Read(d)
 	return hex.EncodeToString(d)
 }
 
-// admin signup api
+func GenerateAdminRefreshToken() string {
+	return GenerateAdminToken(32)
+}
+
+// -------------------- ADMIN SIGNUP --------------------
 func AdminSignUp(c *gin.Context) {
-	// ctx
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// type struct
-	type AdminSignUp struct {
-		AdminName string `json:"adminname" form:"name"`
+	type AdminSignUpInput struct {
+		AdminName string `json:"adminname" form:"adminname"`
 		Email     string `json:"email" form:"email"`
 		Password  string `json:"password" form:"password"`
 		Phone     string `json:"phone" form:"phone"`
@@ -52,165 +55,128 @@ func AdminSignUp(c *gin.Context) {
 		Location  string `json:"location" form:"location"`
 	}
 
-	// bind into json
-	var inputAdmin AdminSignUp
-	if err := c.ShouldBindJSON(&inputAdmin); err != nil {
-		c.JSON(400, gin.H{
-			"msg": "Invalid Request",
-		})
+	var input AdminSignUpInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Request"})
 		return
 	}
 
-	// validations
-	if inputAdmin.AdminName == "" || inputAdmin.Email == "" || inputAdmin.Password == "" || inputAdmin.Phone == "" || inputAdmin.Language == "" || inputAdmin.Location == "" {
-		c.JSON(400, gin.H{
-			"msg": "Invalid Request, please fill all fields⚠️",
-		})
+	if input.AdminName == "" || input.Email == "" || input.Password == "" ||
+		input.Phone == "" || input.Language == "" || input.Location == "" {
+		c.JSON(400, gin.H{"msg": "Please fill all fields⚠️"})
 		return
 	}
 
-	if !strings.Contains(inputAdmin.Email, "@") {
-		c.JSON(400, gin.H{
-			"msg": "Invalid email",
-		})
+	if !strings.Contains(input.Email, "@") || len(input.Password) < 6 || len(input.Phone) < 10 {
+		c.JSON(400, gin.H{"msg": "Invalid email/password/phone"})
 		return
 	}
 
-	if len(inputAdmin.Password) < 6 {
-		c.JSON(400, gin.H{
-			"msg": "Invalid password length",
-		})
-		return
-	}
+	var (
+		count     int64
+		countErr  error
+		hashPass  []byte
+		hashErr   error
+		insertErr error
+	)
 
-	if len(inputAdmin.Phone) < 10 {
-		c.JSON(400, gin.H{
-			"msg": "Invalid phone number length",
-		})
-		return
-	}
+	emailToken := GenerateAdminToken(8)
+	phoneToken := GenerateAdminToken(8)
 
-	// duplicate chekc
-	count, err := adminCollection.CountDocuments(ctx, bson.M{"email": inputAdmin.Email})
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "Invalid db error",
-		})
-		return
-	}
-
-	if count > 0 {
-		c.JSON(400, gin.H{
-			"msg": "Admin Already Exists, Please Go Login⚠️",
-		})
-		return
-	}
-
-	// hash the pass
-	hashPass, err := bcrypt.GenerateFromPassword([]byte(inputAdmin.Password), 10)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "couldn't hash pass",
-		})
-		return
-	}
-
-	emailToken := GenerateToken(8)
-	phoneToken := GenerateToken(8)
-
-	// create new var and send email
 	var newAdmin models.Admin
-
 	newAdmin.ID = primitive.NewObjectID()
 	newAdmin.Role = "admin"
-	newAdmin.AdminName = inputAdmin.AdminName
-	newAdmin.Email = inputAdmin.Email
-	newAdmin.Password = string(hashPass)
-	newAdmin.Location = inputAdmin.Location
-	newAdmin.Language = inputAdmin.Language
-	newAdmin.Phone = inputAdmin.Phone
+	newAdmin.AdminName = input.AdminName
+	newAdmin.Email = input.Email
+	newAdmin.Location = input.Location
+	newAdmin.Language = input.Language
+	newAdmin.Phone = input.Phone
 	newAdmin.AdminVerified.Email = false
 	newAdmin.AdminVerifyToken.Email = emailToken
 	newAdmin.AdminVerifyToken.Phone = phoneToken
 	newAdmin.CreatedAt = time.Now()
 	newAdmin.UpdatedAt = time.Now()
 
-	// send email
+	// Run count + hash concurrently
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
 	go func() {
-
-		emailData := utils.EmailData{
-			From:    "Team Ivents Plannerz🎉",
-			To:      inputAdmin.Email,
-			Subject: "Email Verification",
-			Html:    fmt.Sprintf(`<a href="%s/api/public/admin/emailverify/%s">Verify email</a>`, adminUrl, emailToken),
-		}
-
-		_ = utils.SendEmail(emailData)
-
+		defer wg.Done()
+		count, countErr = adminCollection.CountDocuments(ctx, bson.M{"email": input.Email})
 	}()
 
-	// push into db
-	_, err = adminCollection.InsertOne(ctx, newAdmin)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "Db error",
-		})
+	go func() {
+		defer wg.Done()
+		hashPass, hashErr = bcrypt.GenerateFromPassword([]byte(input.Password), 10)
+	}()
+
+	wg.Wait()
+
+	if countErr != nil || hashErr != nil {
+		c.JSON(500, gin.H{"msg": "Internal error"})
+		return
+	}
+	if count > 0 {
+		c.JSON(400, gin.H{"msg": "Admin already exists⚠️"})
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"msg": "Admin Signed Up🎉, Verify Your Email and then login✅",
-	})
+	newAdmin.Password = string(hashPass)
+	_, insertErr = adminCollection.InsertOne(ctx, newAdmin)
+	if insertErr != nil {
+		c.JSON(500, gin.H{"msg": "Database error"})
+		return
+	}
 
+	// Fire email in background
+	go func() {
+		emailData := utils.EmailData{
+			From:    "Team Ivents Plannerz🎉",
+			To:      input.Email,
+			Subject: "Email Verification",
+			Html:    fmt.Sprintf(`<a href="%s/api/public/admin/emailverify/%s">Verify email</a>`, adminUrl, emailToken),
+		}
+		_ = utils.SendEmail(emailData)
+	}()
+
+	c.JSON(200, gin.H{"msg": "Admin Signed Up🎉, Verify Your Email and then login✅"})
 }
 
-// email verify api
+// -------------------- EMAIL VERIFY --------------------
 func EmailVerifyAdmin(c *gin.Context) {
-	// ctx
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	token := c.Param("token")
 
-	// compare token
 	var admin models.Admin
 	err := adminCollection.FindOne(ctx, bson.M{"adminVerifyToken.emailVerifyToken": token}).Decode(&admin)
 	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid token",
-		})
+		c.JSON(400, gin.H{"msg": "Invalid Token"})
 		return
 	}
 
 	if admin.AdminVerified.Email {
-		c.JSON(200, gin.H{
-			"msg": "Email Verified already, u can login now!",
-		})
+		c.JSON(200, gin.H{"msg": "Email already verified✅"})
 		return
 	}
 
-	// update
-	update := bson.M{
-		"$set": bson.M{
-			"adminverified.emailVerified":       true,
-			"adminVerifyToken.emailVerifyToken": nil,
-			"updated_at":                        time.Now(),
-		}}
+	update := bson.M{"$set": bson.M{
+		"adminverified.emailVerified":       true,
+		"adminVerifyToken.emailVerifyToken": nil,
+		"updated_at":                        time.Now(),
+	}}
 
-	// update db
 	_, err = adminCollection.UpdateByID(ctx, admin.ID, update)
 	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "db error",
-		})
+		c.JSON(400, gin.H{"msg": "Database update error"})
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"msg": "email Verified✨🙌",
-	})
+	c.JSON(200, gin.H{"msg": "Email Verified Successfully✨"})
 }
 
+// -------------------- SIGN IN --------------------
 func AdminSignIn(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -222,50 +188,82 @@ func AdminSignIn(c *gin.Context) {
 
 	var input AdminSignInInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"msg": "invalid request"})
+		c.JSON(400, gin.H{"msg": "Invalid request"})
+		return
+	}
+
+	if input.Email == "" || input.Password == "" ||
+		!strings.Contains(input.Email, "@") || len(input.Password) < 6 {
+		c.JSON(400, gin.H{"msg": "Invalid email/password"})
 		return
 	}
 
 	var admin models.Admin
-	err := adminCollection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&admin)
-	if err != nil {
-		c.JSON(400, gin.H{"msg": "admin not found"})
+	if err := adminCollection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&admin); err != nil {
+		c.JSON(400, gin.H{"msg": "No admin found!"})
 		return
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(input.Password))
-	if err != nil {
-		c.JSON(400, gin.H{"msg": "invalid password"})
+	var (
+		passErr       error
+		tokenErr      error
+		updateErr     error
+		accessToken   string
+		refreshToken  string
+	)
+
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
+	// Password check
+	go func() {
+		defer wg.Done()
+		passErr = bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(input.Password))
+	}()
+
+	// Access token generation
+	go func() {
+		defer wg.Done()
+		accessToken, tokenErr = jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"id":    admin.ID.Hex(),
+			"role":  admin.Role,
+			"email": admin.Email,
+			"exp":   time.Now().Add(5 * time.Hour).Unix(),
+		}).SignedString(adminJwtKey)
+	}()
+
+	// Refresh token + DB update
+	go func() {
+		defer wg.Done()
+		refreshToken = GenerateAdminRefreshToken()
+		_, updateErr = adminCollection.UpdateByID(ctx, admin.ID, bson.M{
+			"$set": bson.M{
+				"refreshToken":  refreshToken,
+				"refreshExpiry": time.Now().Add(7 * 24 * time.Hour),
+				"updated_at":    time.Now(),
+			},
+		})
+	}()
+
+	wg.Wait()
+
+	if passErr != nil {
+		c.JSON(400, gin.H{"msg": "Invalid password"})
 		return
 	}
-
-	// Access token
-	accessToken, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"id":    admin.ID.Hex(),
-		"role":  admin.Role,
-		"email": admin.Email,
-		"exp":   time.Now().Add(5 * time.Hour).Unix(),
-	}).SignedString([]byte(config.AppConfig.JWTKEY))
-
-	// Refresh token
-	refreshToken := GenerateUserToken(32)
-	refreshExpiry := time.Now().Add(7 * 24 * time.Hour)
-
-	_, _ = adminCollection.UpdateByID(ctx, admin.ID, bson.M{
-		"$set": bson.M{
-			"refreshToken":  refreshToken,
-			"refreshExpiry": refreshExpiry,
-			"updated_at":    time.Now(),
-		},
-	})
+	if tokenErr != nil || updateErr != nil {
+		c.JSON(500, gin.H{"msg": "Internal error"})
+		return
+	}
 
 	c.JSON(200, gin.H{
-		"msg":          "Admin logged in successfully",
+		"msg":          "Admin logged in successfully✨",
 		"token":        accessToken,
 		"refreshToken": refreshToken,
 	})
 }
 
+// -------------------- REFRESH TOKEN --------------------
 func AdminRefreshToken(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -273,7 +271,6 @@ func AdminRefreshToken(c *gin.Context) {
 	type RefreshInput struct {
 		RefreshToken string `json:"refreshToken"`
 	}
-
 	var input RefreshInput
 	if err := c.ShouldBindJSON(&input); err != nil || input.RefreshToken == "" {
 		c.JSON(400, gin.H{"msg": "Invalid request"})
@@ -287,203 +284,88 @@ func AdminRefreshToken(c *gin.Context) {
 		return
 	}
 
-	// New access token
-	accessToken, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    admin.ID.Hex(),
 		"role":  admin.Role,
 		"email": admin.Email,
 		"exp":   time.Now().Add(5 * time.Hour).Unix(),
-	}).SignedString([]byte(config.AppConfig.JWTKEY))
-
-	// Refresh token
-	refreshToken := GenerateToken(32) // <-- yahan GenerateUserToken nahi use karna
-	refreshExpiry := time.Now().Add(7 * 24 * time.Hour)
-
-	_, _ = adminCollection.UpdateByID(ctx, admin.ID, bson.M{
-		"$set": bson.M{
-			"refreshToken":  refreshToken,
-			"refreshExpiry": refreshExpiry,
-			"updated_at":    time.Now(),
-		},
-	})
-
-	// Response
-	c.JSON(200, gin.H{
-		"msg":          "Admin logged in successfully",
-		"token":        accessToken,
-		"refreshToken": refreshToken,
-	})
-
-}
-
-// change pass api
-func AdminChangePass(c *gin.Context) {
-	// ctx
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// type struct
-	type AdminSignIn struct {
-		Email       string `json:"email" form:"email"`
-		Oldpassword string `json:"oldpassword" form:"oldpassword"`
-		Newpassword string `json:"newpassword" form:"newpassword"`
-	}
-
-	// bind into json
-	var inputAdmin AdminSignIn
-	if err := c.ShouldBindJSON(&inputAdmin); err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid request",
-		})
-		return
-	}
-
-	// validations
-	if inputAdmin.Email == "" || inputAdmin.Oldpassword == "" || inputAdmin.Newpassword == "" {
-		c.JSON(400, gin.H{
-			"msg": "invalid request, fill all fields",
-		})
-		return
-	}
-
-	if !strings.Contains(inputAdmin.Email, "@") {
-		c.JSON(400, gin.H{
-			"msg": "invalid email",
-		})
-		return
-	}
-
-	if len(inputAdmin.Newpassword) < 6 {
-		c.JSON(400, gin.H{
-			"msg": "invalid new pass length",
-		})
-		return
-	}
-
-	// find email in db
-	var admin models.Admin
-	err := adminCollection.FindOne(ctx, bson.M{"email": inputAdmin.Email}).Decode(&admin)
+	}).SignedString(adminJwtKey)
 	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid request, no email found",
-		})
-		return
-	}
-
-	// compare old pass
-	err = bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(inputAdmin.Oldpassword))
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid old password",
-		})
-		return
-	}
-
-	// hash new pass
-	hashPass, err := bcrypt.GenerateFromPassword([]byte(inputAdmin.Newpassword), 10)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "hashing failed",
-		})
-		return
-	}
-
-	// update db
-	update := bson.M{
-		"$set": bson.M{
-			"password":   string(hashPass),
-			"updated_at": time.Now(),
-		}}
-	// update db
-	_, err = adminCollection.UpdateByID(ctx, admin.ID, update)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid db error",
-		})
+		c.JSON(400, gin.H{"msg": "Token generation failed"})
 		return
 	}
 
 	c.JSON(200, gin.H{
-		"msg": "Password Changed Successfully!✅",
+		"msg":   "New access token generated✅",
+		"token": accessToken,
 	})
-
 }
 
-// forgot passs api
+// -------------------- FORGOT PASSWORD --------------------
 func AdminForgotPass(c *gin.Context) {
-	// ctx
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// type struct
-	type AdminForgotPass struct {
-		Email string `json:"email" form:"email"`
+	type ForgotPassInput struct {
+		Email string `json:"email"`
 	}
 
-	// bind
-	var inputAdmin AdminForgotPass
-	if err := c.ShouldBindJSON(&inputAdmin); err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid request",
-		})
+	var input ForgotPassInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Request"})
 		return
 	}
 
-	// validations
-	if !strings.Contains(inputAdmin.Email, "@") || inputAdmin.Email == "" {
-		c.JSON(400, gin.H{
-			"msg": "invalid Email",
-		})
+	if input.Email == "" || !strings.Contains(input.Email, "@") {
+		c.JSON(400, gin.H{"msg": "Invalid Email"})
 		return
 	}
 
-	// find user in db
 	var admin models.Admin
-	err := adminCollection.FindOne(ctx, bson.M{"email": inputAdmin.Email}).Decode(&admin)
+	err := adminCollection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&admin)
 	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid db error",
-		})
+		c.JSON(400, gin.H{"msg": "Email not found"})
 		return
 	}
 
-	// generate temp pass
-	tempPass := GenerateToken(8)
-	hashNewPass, err := bcrypt.GenerateFromPassword([]byte(tempPass), 10)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid request, couldnt hash pass",
-		})
+	tempPass := GenerateAdminToken(10)
+	hashPass, hashErr := bcrypt.GenerateFromPassword([]byte(tempPass), 10)
+	if hashErr != nil {
+		c.JSON(500, gin.H{"msg": "Error hashing password"})
 		return
 	}
 
-	// update the db
-	update := bson.M{
-		"$set": bson.M{
-			"password":   string(hashNewPass),
-			"updated_at": time.Now(),
-		}}
-
-	// update db
-	_, err = adminCollection.UpdateByID(ctx, admin.ID, update)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"msg": "invalid db error",
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var updateErr error
+	go func() {
+		defer wg.Done()
+		_, updateErr = adminCollection.UpdateByID(ctx, admin.ID, bson.M{
+			"$set": bson.M{
+				"password":   string(hashPass),
+				"updated_at": time.Now(),
+			},
 		})
+	}()
+	wg.Wait()
+
+	if updateErr != nil {
+		c.JSON(500, gin.H{"msg": "Database update failed"})
 		return
 	}
 
-	// email
-	emailData := utils.EmailData{
-		From:    "Team Ivents Plannerz🎉",
-		To:      inputAdmin.Email,
-		Subject: "Email Verification",
-		Html:    fmt.Sprintf(`<h2>Your Temporary password is <strong>%s</strong></h2>`, tempPass),
-	}
+	go func(email, pass string) {
+		emailData := utils.EmailData{
+			From:    "Team Ivents Plannerz🎉",
+			To:      email,
+			Subject: "Password Reset Request",
+			Html: fmt.Sprintf(`
+				<h2>Your temporary password:</h2>
+				<p style="font-size:18px; font-weight:bold;">%s</p>
+				<p>Please login and change it immediately.</p>`, pass),
+		}
+		_ = utils.SendEmail(emailData)
+	}(input.Email, tempPass)
 
-	_ = utils.SendEmail(emailData)
-
-	c.JSON(200, gin.H{
-		"msg": "Temporary email sent to ur mail✅✨",
-	})
+	c.JSON(200, gin.H{"msg": "Temporary password sent to your email✅"})
 }

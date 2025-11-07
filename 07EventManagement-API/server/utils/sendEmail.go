@@ -38,6 +38,6 @@ func SendEmail(data EmailData) error {
 		fmt.Println("Couldn't send Email")
 	}
 
-	fmt.Println("SMS Sent✅")
+	fmt.Println("emal Sent✅")
 	return nil
 }

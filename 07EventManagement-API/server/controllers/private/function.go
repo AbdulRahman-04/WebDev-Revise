@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -365,4 +366,189 @@ func DeleteAllFunctions(c *gin.Context) {
 	}()
 
 	c.JSON(200, gin.H{"msg": "All Functions Deleted✅"})
+}
+
+
+// -------------------- JOIN FUNCTION (Hybrid Model Safe & Concurrent) --------------------
+func JoinFunction(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	userId := c.MustGet("userId").(primitive.ObjectID)
+	funcID, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Function ID"})
+		return
+	}
+
+	funcColl := utils.MongoClient.Database("Event_Booking").Collection("functions")
+	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
+
+	var function models.Function
+	var existingReq models.JoinRequest
+
+	// ✅ Step 1: Check if function exists
+	if err := funcColl.FindOne(ctx, bson.M{"_id": funcID}).Decode(&function); err != nil {
+		c.JSON(404, gin.H{"msg": "Function not found"})
+		return
+	}
+
+	// ✅ Step 2: Check if user already requested or joined
+	err = joinColl.FindOne(ctx, bson.M{
+		"functionId":  funcID,
+		"requesterId": userId,
+	}).Decode(&existingReq)
+	if err == nil {
+		c.JSON(400, gin.H{"msg": "Already requested or joined"})
+		return
+	}
+
+	// ✅ Step 3: Prevent self-join
+	if function.UserId == userId {
+		c.JSON(400, gin.H{"msg": "You cannot join your own function"})
+		return
+	}
+
+	// ✅ Step 4: Public function — instant join
+	if strings.ToLower(function.IsPublic) == "public" {
+		go func() {
+			fmt.Printf("✅ User %s joined public function '%s'\n", userId.Hex(), function.FuncName)
+		}()
+		c.JSON(200, gin.H{
+			"msg":           "Joined function successfully 🎉",
+			"autoJoin":      true,
+			"functionId":    function.ID,
+			"functionName":  function.FuncName,
+			"functionOwner": function.UserId,
+		})
+		return
+	}
+
+	// ✅ Step 5: Private function — create join request asynchronously
+	newReq := models.JoinRequest{
+		ID:          primitive.NewObjectID(),
+		FunctionID:  &funcID,
+		RequesterID: userId,
+		OwnerID:     function.UserId,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	go func() {
+		rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := joinColl.InsertOne(rctx, newReq); err != nil {
+			fmt.Println("❌ Join request insert failed:", err)
+		} else {
+			fmt.Printf("📨 Join request created for function '%s' by user %s\n", function.FuncName, userId.Hex())
+		}
+	}()
+
+	c.JSON(200, gin.H{
+		"msg":          "Join request sent successfully 📨",
+		"functionName": function.FuncName,
+		"requestId":    newReq.ID,
+		"requestType":  "private function",
+	})
+}
+
+// -------------------- APPROVE FUNCTION JOIN REQUEST --------------------
+func ApproveFunctionJoinRequest(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	ownerId := c.MustGet("userId").(primitive.ObjectID)
+	reqID, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Request ID"})
+		return
+	}
+
+	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
+
+	var req models.JoinRequest
+	if err := joinColl.FindOne(ctx, bson.M{"_id": reqID, "ownerId": ownerId}).Decode(&req); err != nil {
+		c.JSON(404, gin.H{"msg": "No such request or unauthorized"})
+		return
+	}
+
+	done := make(chan bool, 1)
+	go func() {
+		rctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		_, err := joinColl.UpdateByID(rctx, reqID, bson.M{"$set": bson.M{
+			"status":     "accepted",
+			"updated_at": time.Now(),
+		}})
+		done <- err == nil
+	}()
+
+	if success := <-done; !success {
+		c.JSON(500, gin.H{"msg": "Failed to approve join request"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"msg":         "Join request approved ✅",
+		"status":      "accepted",
+		"functionId":  req.FunctionID,
+		"requesterId": req.RequesterID,
+	})
+}
+
+// -------------------- REJECT FUNCTION JOIN REQUEST --------------------
+func RejectFunctionJoinRequest(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ownerId := c.MustGet("userId").(primitive.ObjectID)
+	reqID, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Request ID"})
+		return
+	}
+
+	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
+
+	res, err := joinColl.UpdateOne(ctx,
+		bson.M{"_id": reqID, "ownerId": ownerId},
+		bson.M{"$set": bson.M{"status": "rejected", "updated_at": time.Now()}},
+	)
+	if err != nil || res.MatchedCount == 0 {
+		c.JSON(404, gin.H{"msg": "No request found or unauthorized"})
+		return
+	}
+
+	c.JSON(200, gin.H{"msg": "Join request rejected ❌"})
+}
+
+// -------------------- VIEW PENDING FUNCTION JOIN REQUESTS --------------------
+func ViewPendingFunctionRequests(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	ownerId := c.MustGet("userId").(primitive.ObjectID)
+	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
+
+	cursor, err := joinColl.Find(ctx, bson.M{
+		"ownerId":     ownerId,
+		"status":      "pending",
+		"functionId":  bson.M{"$exists": true},
+	})
+	if err != nil {
+		c.JSON(500, gin.H{"msg": "DB error"})
+		return
+	}
+
+	var requests []models.JoinRequest
+	if err := cursor.All(ctx, &requests); err != nil {
+		c.JSON(500, gin.H{"msg": "Failed to read join requests"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"msg":  "Pending function join requests ✅",
+		"data": requests,
+	})
 }

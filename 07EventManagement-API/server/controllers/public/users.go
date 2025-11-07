@@ -139,7 +139,7 @@ func UserSignUp(c *gin.Context) {
 	c.JSON(200, gin.H{"msg": "User Signed Up🎉, Verify Your Email and then login✅"})
 }
 
-// -------------------- EMAIL VERIFY --------------------
+
 func EmailVerifyUser(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -148,29 +148,33 @@ func EmailVerifyUser(c *gin.Context) {
 	var user models.User
 	err := userCollection.FindOne(ctx, bson.M{"userverifytoken.emailVerifyToken": token}).Decode(&user)
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid Token"})
+		c.JSON(400, gin.H{"msg": "Invalid or expired token"})
 		return
 	}
 
 	if user.Userverified.Email {
-		c.JSON(200, gin.H{"msg": "Email Verified already, u can login now!"})
+		c.JSON(200, gin.H{"msg": "Email already verified✅"})
 		return
 	}
 
-	update := bson.M{"$set": bson.M{
-		"userverified.emailVerified":       true,
-		"userverifytoken.emailVerifyToken": nil,
-		"updated_at":                       time.Now(),
-	}}
+	update := bson.M{
+		"$set": bson.M{
+			"userverified.email":       true,
+			"userverifytoken.email":    nil,
+			"updatedat":                time.Now(),
+		},
+	}
 
 	_, err = userCollection.UpdateByID(ctx, user.ID, update)
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "db error"})
+		c.JSON(500, gin.H{"msg": "Database update error"})
 		return
 	}
 
-	c.JSON(200, gin.H{"msg": "email Verified✨🙌"})
+	c.JSON(200, gin.H{"msg": "Email verified successfully🎉"})
 }
+
+
 
 //                     SIGN IN API 
 func UserSignIn(c *gin.Context) {
