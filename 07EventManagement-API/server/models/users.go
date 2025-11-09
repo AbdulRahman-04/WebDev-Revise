@@ -17,6 +17,12 @@ type User struct {
 	Language string `bson:"language" json:"language" binding:"required,oneof=Hindi English Urdu Kannada"`
 	Location string `bson:"location" json:"location" binding:"required"`
 
+	
+	// ✅ New fields for OAuth login
+	Provider   string `bson:"provider" json:"provider"`         // google, github, email
+	ProfilePic string `bson:"profile_pic" json:"profile_pic"`   // user ka google avatar
+
+
 	Userverified struct {
 		Email bool `bson:"emailVerified" json:"emailVerified"`
 	} `bson:"userverified" json:"userverified"`
