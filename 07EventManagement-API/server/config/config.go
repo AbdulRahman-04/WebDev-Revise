@@ -37,11 +37,12 @@ type RedisConfig struct {
 	DB       int
 }
 
-// ✅ Separate Google OAuth for user & admin
+// ✅ OAuth config for both Google & GitHub
 type OAuthConfig struct {
-	GoogleUser  GoogleOAuth
-	GoogleAdmin GoogleOAuth
-	Github      GithubOAuth
+	GoogleUser   GoogleOAuth
+	GoogleAdmin  GoogleOAuth
+	GithubUser   GithubOAuth
+	GithubAdmin  GithubOAuth
 }
 
 type GoogleOAuth struct {
@@ -59,7 +60,6 @@ type GithubOAuth struct {
 var AppConfig *Config
 
 func init() {
-	// Load .env
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ No .env file found")
 	}
@@ -89,6 +89,7 @@ func init() {
 		},
 
 		OAuth: OAuthConfig{
+			// ✅ Google OAuth
 			GoogleUser: GoogleOAuth{
 				ClientID:     os.Getenv("GOOGLE_CLIENT_ID_USER"),
 				ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET_USER"),
@@ -99,10 +100,17 @@ func init() {
 				ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET_ADMIN"),
 				RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL_ADMIN"),
 			},
-			Github: GithubOAuth{
-				ClientID:     os.Getenv("GITHUB_CLIENT_ID"),
-				ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
-				RedirectURL:  os.Getenv("GITHUB_REDIRECT_URL"),
+
+			// ✅ GitHub OAuth
+			GithubUser: GithubOAuth{
+				ClientID:     os.Getenv("GITHUB_CLIENT_ID_USER"),
+				ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET_USER"),
+				RedirectURL:  os.Getenv("GITHUB_REDIRECT_URL_USER"),
+			},
+			GithubAdmin: GithubOAuth{
+				ClientID:     os.Getenv("GITHUB_CLIENT_ID_ADMIN"),
+				ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET_ADMIN"),
+				RedirectURL:  os.Getenv("GITHUB_REDIRECT_URL_ADMIN"),
 			},
 		},
 	}

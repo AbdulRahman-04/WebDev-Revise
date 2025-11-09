@@ -40,5 +40,18 @@ func PublicRoutes(r *gin.Engine) {
 		// 🛡️ Admin Google OAuth
 		publicGroup.GET("/auth/google/admin", auth.GoogleLoginAdmin)
 		publicGroup.GET("/auth/google/admin/callback", auth.GoogleCallbackAdmin)
+
+		// ============================
+		// 🔹 GITHUB OAUTH ROUTES
+		// ============================
+
+		// 👤 User GitHub OAuth
+		publicGroup.GET("/auth/github/user", auth.GithubLoginUser)
+		publicGroup.GET("/auth/github/user/callback", auth.GithubCallbackUser)
+
+		// 🛡️ Admin GitHub OAuth
+		publicGroup.GET("/auth/github/admin", auth.GithubLoginAdmin)
+		publicGroup.GET("/auth/github/admin/callback", auth.GithubCallbackAdmin)
+
 	}
 }
