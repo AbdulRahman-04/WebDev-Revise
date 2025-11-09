@@ -17,6 +17,7 @@ type Config struct {
 	Email   EmailConfig
 	Phone   PhoneConfig
 	Redis   RedisConfig
+	OAuth   OAuthConfig
 }
 
 type EmailConfig struct {
@@ -36,10 +37,29 @@ type RedisConfig struct {
 	DB       int
 }
 
+// ✅ Separate Google OAuth for user & admin
+type OAuthConfig struct {
+	GoogleUser  GoogleOAuth
+	GoogleAdmin GoogleOAuth
+	Github      GithubOAuth
+}
+
+type GoogleOAuth struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+}
+
+type GithubOAuth struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+}
+
 var AppConfig *Config
 
 func init() {
-	// ✅ Load .env
+	// Load .env
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ No .env file found")
 	}
@@ -50,24 +70,44 @@ func init() {
 		DBURI:   os.Getenv("MONGO_URI"),
 		URL:     os.Getenv("BASE_URL"),
 		JWTKEY:  os.Getenv("JWT_KEY"),
+
 		Email: EmailConfig{
 			User: os.Getenv("EMAIL_USER"),
 			Pass: os.Getenv("EMAIL_PASS"),
 		},
+
 		Phone: PhoneConfig{
 			Sid:   os.Getenv("TWILIO_SID"),
 			Token: os.Getenv("TWILIO_TOKEN"),
 			Phone: os.Getenv("TWILIO_PHONE"),
 		},
+
 		Redis: RedisConfig{
 			Host:     os.Getenv("REDIS_HOST"),
 			Password: os.Getenv("REDIS_PASS"),
 			DB:       getEnvAsInt("REDIS_DB", 0),
 		},
+
+		OAuth: OAuthConfig{
+			GoogleUser: GoogleOAuth{
+				ClientID:     os.Getenv("GOOGLE_CLIENT_ID_USER"),
+				ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET_USER"),
+				RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL_USER"),
+			},
+			GoogleAdmin: GoogleOAuth{
+				ClientID:     os.Getenv("GOOGLE_CLIENT_ID_ADMIN"),
+				ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET_ADMIN"),
+				RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL_ADMIN"),
+			},
+			Github: GithubOAuth{
+				ClientID:     os.Getenv("GITHUB_CLIENT_ID"),
+				ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+				RedirectURL:  os.Getenv("GITHUB_REDIRECT_URL"),
+			},
+		},
 	}
 
-		// ✅ Add this line for debugging
-	log.Println("✅ Loaded GEMINI_API_KEY:", os.Getenv("GEMINI_API_KEY"))
+	log.Println("✅ Config Loaded | Port:", AppConfig.Port)
 }
 
 func getEnvAsInt(key string, defaultVal int) int {

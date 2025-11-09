@@ -63,17 +63,20 @@ func UserSignUp(c *gin.Context) {
 		c.JSON(400, gin.H{"msg": "Please fill all fields⚠️"})
 		return
 	}
+
 	if !strings.Contains(inputUser.Email, "@") || len(inputUser.Password) < 6 || len(inputUser.Phone) < 10 {
 		c.JSON(400, gin.H{"msg": "Invalid email/password/phone"})
 		return
 	}
 
 	var (
-		count     int64
-		countErr  error
-		hashPass  []byte
-		hashErr   error
-		insertErr error
+		count       int64
+		countErr    error
+		adminExists int64
+		adminErr    error
+		hashPass    []byte
+		hashErr     error
+		insertErr   error
 	)
 
 	emailToken := GenerateUserToken(8)
@@ -93,13 +96,19 @@ func UserSignUp(c *gin.Context) {
 	newUser.Createdat = time.Now()
 	newUser.Updatedat = time.Now()
 
-	// Run count + hash concurrently
+	// ✅ Run cross checks + hash concurrently
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
 		count, countErr = userCollection.CountDocuments(ctx, bson.M{"email": inputUser.Email})
+	}()
+
+	go func() {
+		defer wg.Done()
+		adminColl := utils.MongoClient.Database("Event_Booking").Collection("admin")
+		adminExists, adminErr = adminColl.CountDocuments(ctx, bson.M{"email": inputUser.Email})
 	}()
 
 	go func() {
@@ -109,12 +118,14 @@ func UserSignUp(c *gin.Context) {
 
 	wg.Wait()
 
-	if countErr != nil || hashErr != nil {
+	// ✅ Validate results
+	if countErr != nil || adminErr != nil || hashErr != nil {
 		c.JSON(500, gin.H{"msg": "Internal error"})
 		return
 	}
-	if count > 0 {
-		c.JSON(400, gin.H{"msg": "User already exists⚠️"})
+
+	if count > 0 || adminExists > 0 {
+		c.JSON(400, gin.H{"msg": "Email already registered as user or admin⚠️"})
 		return
 	}
 
@@ -125,20 +136,19 @@ func UserSignUp(c *gin.Context) {
 		return
 	}
 
-	// Fire email in background (no wait)
+	// ✅ Fire email verification in background
 	go func() {
 		emailData := utils.EmailData{
 			From:    "Team Ivents Plannerz🎉",
 			To:      inputUser.Email,
 			Subject: "Email Verification",
-			Html:    fmt.Sprintf(`<a href="%s/api/public/user/emailverify/%s">Verify email</a>`, userUrl, emailToken),
+			Html:    fmt.Sprintf(`<a href="%s/api/public/users/emailverify/%s">Verify email</a>`, userUrl, emailToken),
 		}
 		_ = utils.SendEmail(emailData)
 	}()
 
 	c.JSON(200, gin.H{"msg": "User Signed Up🎉, Verify Your Email and then login✅"})
 }
-
 
 func EmailVerifyUser(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -159,9 +169,9 @@ func EmailVerifyUser(c *gin.Context) {
 
 	update := bson.M{
 		"$set": bson.M{
-			"userverified.email":       true,
-			"userverifytoken.email":    nil,
-			"updatedat":                time.Now(),
+			"userverified.email":    true,
+			"userverifytoken.email": nil,
+			"updatedat":             time.Now(),
 		},
 	}
 
@@ -174,9 +184,7 @@ func EmailVerifyUser(c *gin.Context) {
 	c.JSON(200, gin.H{"msg": "Email verified successfully🎉"})
 }
 
-
-
-//                     SIGN IN API 
+// SIGN IN API
 func UserSignIn(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -205,10 +213,10 @@ func UserSignIn(c *gin.Context) {
 	}
 
 	var (
-		passErr    error
-		tokenErr   error
-		updateErr  error
-		accessToken string
+		passErr      error
+		tokenErr     error
+		updateErr    error
+		accessToken  string
 		refreshToken string
 	)
 

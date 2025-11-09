@@ -46,8 +46,12 @@ func main() {
 
 	// ----------------- CORS -----------------
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"}, // 🔥 you can restrict later
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+		AllowOrigins: []string{
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+			"https://ivent-plannerz-ai.vercel.app",
+		},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,

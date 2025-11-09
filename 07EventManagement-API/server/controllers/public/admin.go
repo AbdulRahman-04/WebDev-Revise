@@ -135,7 +135,8 @@ func AdminSignUp(c *gin.Context) {
 			From:    "Team Ivents Plannerz🎉",
 			To:      input.Email,
 			Subject: "Email Verification",
-			Html:    fmt.Sprintf(`<a href="%s/api/public/admin/emailverify/%s">Verify email</a>`, adminUrl, emailToken),
+			Html: fmt.Sprintf(`<a href="%s/api/public/admins/emailverify/%s">Verify email</a>`, adminUrl, emailToken),
+
 		}
 		_ = utils.SendEmail(emailData)
 	}()

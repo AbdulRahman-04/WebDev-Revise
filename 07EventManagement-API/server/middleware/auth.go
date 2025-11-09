@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"strings"
+	"time"
 
 	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/config"
 	"github.com/gin-gonic/gin"
@@ -89,4 +90,15 @@ func AuthMiddleware() gin.HandlerFunc{
 
 		c.Next()
 	}
+}
+
+// GenerateJWT creates a new token for given user email (or id)
+func GenerateJWT(email string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"email": email,          // you can replace with "id" if you want
+		"role":  "user",         // default role
+		"exp":   jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // expiry 1 day
+		"iat":   jwt.NewNumericDate(time.Now()),
+	})
+	return token.SignedString(myKey)
 }
