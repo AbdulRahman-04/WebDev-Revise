@@ -1,0 +1,5 @@
+[IVENTS LOG] 2025/11/10 06:21:31 [32m[2025-11-10 06:21:31][0m 1762735891548566742 | [32m200[0m | POST    | ::1             | /api/public/users/signup | Took: 305ms
+[IVENTS LOG] 2025/11/10 06:21:57 [32m[2025-11-10 06:21:57][0m 1762735917466352709 | [32m200[0m | GET     | ::1             | /api/public/users/emailverify/96d0240006f720cf | Took: 273ms
+[IVENTS LOG] 2025/11/10 06:21:58 [32m[2025-11-10 06:21:58][0m 1762735918453765815 | [31m404[0m | GET     | ::1             | /favicon.ico | Took: 0s
+[IVENTS LOG] 2025/11/10 06:22:12 [32m[2025-11-10 06:22:12][0m 1762735932367784529 | [31m401[0m | POST    | ::1             | /api/public/users/refreshtoken | Took: 28ms
+[IVENTS LOG] 2025/11/10 06:22:34 [32m[2025-11-10 06:22:34][0m 1762735954363240553 | [32m200[0m | POST    | ::1             | /api/public/users/signin | Took: 253ms
