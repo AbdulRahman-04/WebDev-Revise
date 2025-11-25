@@ -12,7 +12,7 @@ type Admin struct {
 	Role string `bson:"role" json:"role"`
 
 	AdminName string `bson:"adminname" json:"adminname" binding:"required"`
-	Email string `bson:"email" json:"email" binding:"required"` // You can optionally add: ,email
+	Email string `bson:"email" json:"email" binding:"required,email"` // You can optionally add: ,email
 	Password string `bson:"password" json:"password" binding:"required,min=6"`
 	Phone string  `bson:"phone" json:"phone" binding:"required,min=6"` // Better to use len=10 if fixed length
 	Language string `bson:"language" json:"language" binding:"required,oneof=Hindi English Urdu Kannada"`

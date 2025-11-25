@@ -31,6 +31,8 @@ func main() {
 	// ----------------- DB + Redis -----------------
 	utils.DBConnect()
 	utils.ConnectRedis()
+	utils.CreateMongoIndexes()
+
 
 	// ----------------- Gin Engine -----------------
 	router := gin.New()
@@ -38,9 +40,11 @@ func main() {
 	router.Use(middleware.CustomLogger())
 	router.Use(SecureHeaders())
 
+	// production level app ===> make sure all get all apis are commentned 
+
 	// ----------------- Global Rate Limiter -----------------
 	store := memory.NewStore()
-	rate, _ := limiter.NewRateFromFormatted("100-S") // 100 req/sec global
+	rate, _ := limiter.NewRateFromFormatted("1000-S") // 100 req/sec global
 	instance := limiter.New(store, rate)
 	router.Use(ginlimiter.NewMiddleware(instance))
 

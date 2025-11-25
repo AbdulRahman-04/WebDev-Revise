@@ -42,6 +42,7 @@ func githubCallback(c *gin.Context, role string, oauthConfig *oauth2.Config) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token exchange failed"})
 		return
 	}
+	
 
 	// Fetch user info from GitHub
 	client := oauthConfig.Client(c, token)

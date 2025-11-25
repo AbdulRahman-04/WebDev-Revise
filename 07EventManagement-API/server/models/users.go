@@ -11,7 +11,7 @@ type User struct {
 	Role string `bson:"role" json:"role"`
 
 	Username string `bson:"username" json:"username" binding:"required"`
-	Email string `bson:"email" json:"email" binding:"required"` // Optionally add: ,email
+	Email string `bson:"email" json:"email" binding:"required,email"` // Optionally add: ,email
 	Password string `bson:"password" json:"password" binding:"required,min=6"`
 	Phone string  `bson:"phone" json:"phone" binding:"required,min=6"` // Or use len=10
 	Language string `bson:"language" json:"language" binding:"required,oneof=Hindi English Urdu Kannada"`

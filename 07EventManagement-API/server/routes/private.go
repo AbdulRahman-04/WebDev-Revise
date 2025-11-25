@@ -58,7 +58,7 @@ func PrivateRoutes(r *gin.Engine) {
 		// ==========================
 		privateGroup.POST("/ai/event-desc", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.GenerateDescription)
 		privateGroup.POST("/ai/function-desc", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.GenerateFunctionDesc)
-		privateGroup.POST("/ai/assistant", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.RecommendAI)
+		privateGroup.POST("/ai/assistant", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.Assistant)
 
 		// ==========================
 		// 🧩 EVENT JOIN APIs
