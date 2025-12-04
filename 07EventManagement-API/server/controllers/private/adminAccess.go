@@ -16,19 +16,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// ========================
-// 🔹 Global Collections
-// ========================
 var (
-	UserCollection      *mongo.Collection
-	EventCollection     *mongo.Collection
-	FunctionCollection  *mongo.Collection
-	AdminCollection     *mongo.Collection
+	UserCollection     *mongo.Collection
+	EventCollection    *mongo.Collection
+	FunctionCollection *mongo.Collection
+	AdminCollection    *mongo.Collection
 )
 
-// ========================
-// 🔹 Connect Admin Collections
-// ========================
 func AdminAccessCollect() {
 	db := utils.MongoClient.Database("Event_Booking")
 	AdminCollection = db.Collection("admin")
@@ -37,9 +31,9 @@ func AdminAccessCollect() {
 	FunctionCollection = db.Collection("functions")
 }
 
-// ========================================
-// 🧑‍💼 GET ALL USERS (Admin)
-// ========================================
+// ==========================
+// 🔥 GET ALL USERS (ADMIN)
+// ==========================
 func GetAllUsersAdmin(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -49,57 +43,54 @@ func GetAllUsersAdmin(c *gin.Context) {
 	if page < 1 {
 		page = 1
 	}
-	if limit < 1 {
-		limit = 10
-	}
-	skip := (page - 1) * limit
 
-	cacheKey := "admin:users:page=" + strconv.Itoa(page) + ":limit=" + strconv.Itoa(limit)
-	if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
+	skip := (page - 1) * limit
+	cacheKey := fmt.Sprintf("admin:users:%d:%d", page, limit)
+
+	// Redis Check
+	if cached, _ := utils.RedisClient.Get(ctx, cacheKey).Result(); cached != "" {
 		var users []models.User
 		_ = json.Unmarshal([]byte(cached), &users)
-		total, _ := UserCollection.CountDocuments(ctx, bson.M{})
-		totalPages := (total + int64(limit) - 1) / int64(limit)
+
+		for i := range users {
+			users[i].Password = ""
+			users[i].RefreshToken = ""
+		}
+
 		c.JSON(200, gin.H{
-			"msg": "All Users (from Redis)✨", "users": users,
-			"page": page, "limit": limit, "total": total, "totalPage": totalPages,
-			"hasNext": page < int(totalPages), "hasPrev": page > 1, "source": "cache",
+			"msg":    "Users (cache)✨",
+			"users":  users,
+			"page":   page,
+			"limit":  limit,
+			"source": "cache",
 		})
 		return
 	}
 
-	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
+	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetSort(bson.M{"created_at": -1})
 	cursor, err := UserCollection.Find(ctx, bson.M{}, opts)
 	if err != nil {
 		c.JSON(500, gin.H{"msg": "DB error❌"})
 		return
 	}
-	defer cursor.Close(ctx)
 
 	var users []models.User
-	if err := cursor.All(ctx, &users); err != nil {
-		c.JSON(500, gin.H{"msg": "Error decoding users❌"})
-		return
+	_ = cursor.All(ctx, &users)
+
+	for i := range users {
+		users[i].Password = ""
+		users[i].RefreshToken = ""
 	}
 
-	if len(users) > 0 {
-		data, _ := json.Marshal(users)
-		_ = utils.RedisClient.Set(ctx, cacheKey, data, 10*time.Minute).Err()
-	}
+	// Cache it
+	go utils.RedisClient.Set(ctx, cacheKey, toJson(users), 6*time.Hour)
 
-	total, _ := UserCollection.CountDocuments(ctx, bson.M{})
-	totalPages := (total + int64(limit) - 1) / int64(limit)
-
-	c.JSON(200, gin.H{
-		"msg": "All Users✨", "users": users,
-		"page": page, "limit": limit, "total": total, "totalPage": totalPages,
-		"hasNext": page < int(totalPages), "hasPrev": page > 1, "source": "db",
-	})
+	c.JSON(200, gin.H{"msg": "Users (db)✨", "users": users, "source": "db"})
 }
 
-// ========================================
-// 🧑‍💼 GET ONE USER (Admin)
-// ========================================
+// ==========================
+// 🔥 GET ONE USER
+// ==========================
 func GetOneUserAdmin(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -112,10 +103,15 @@ func GetOneUserAdmin(c *gin.Context) {
 	}
 
 	cacheKey := "admin:user:" + id
-	if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
+
+	if cached, _ := utils.RedisClient.Get(ctx, cacheKey).Result(); cached != "" {
 		var user models.User
 		_ = json.Unmarshal([]byte(cached), &user)
-		c.JSON(200, gin.H{"msg": "User (from Redis)✨", "user": user, "source": "cache"})
+
+		user.Password = ""
+		user.RefreshToken = ""
+
+		c.JSON(200, gin.H{"msg": "User (cache)✨", "user": user})
 		return
 	}
 
@@ -125,111 +121,57 @@ func GetOneUserAdmin(c *gin.Context) {
 		return
 	}
 
-	data, _ := json.Marshal(user)
-	_ = utils.RedisClient.Set(ctx, cacheKey, data, 10*time.Minute).Err()
+	user.Password = ""
+	user.RefreshToken = ""
 
-	c.JSON(200, gin.H{"msg": "User✨", "user": user, "source": "db"})
+	go utils.RedisClient.Set(ctx, cacheKey, toJson(user), 6*time.Hour)
+
+	c.JSON(200, gin.H{"msg": "User✨", "user": user})
 }
 
-// ========================================
-
+// ==========================
+// 🔥 GET ALL EVENTS
+// ==========================
 func AdminGetAllEvents(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pageStr := c.DefaultQuery("page", "1")
-	limitStr := c.DefaultQuery("limit", "10")
-
-	page, _ := strconv.Atoi(pageStr)
-	limit, _ := strconv.Atoi(limitStr)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	if page < 1 {
 		page = 1
 	}
 
 	skip := (page - 1) * limit
-	cacheKey := fmt.Sprintf("admin_events:page=%d:limit=%d", page, limit)
+	cacheKey := fmt.Sprintf("admin:events:%d:%d", page, limit)
 
-	// Try Redis cache first
-	if utils.RedisClient != nil {
-		cached, err := utils.RedisClient.Get(ctx, cacheKey).Result()
-		if err == nil && cached != "" {
-			var cachedData struct {
-				Events    []models.Event `json:"events"`
-				Page      int            `json:"page"`
-				Limit     int            `json:"limit"`
-				Total     int64          `json:"total"`
-				TotalPage int            `json:"totalPage"`
-				HasNext   bool           `json:"hasNext"`
-				HasPrev   bool           `json:"hasPrev"`
-			}
+	if cached, _ := utils.RedisClient.Get(ctx, cacheKey).Result(); cached != "" {
+		var events []models.Event
+		_ = json.Unmarshal([]byte(cached), &events)
 
-			if err := json.Unmarshal([]byte(cached), &cachedData); err == nil {
-				c.JSON(200, gin.H{
-					"msg":       "All Events (from Redis)✨",
-					"events":    cachedData.Events,
-					"page":      cachedData.Page,
-					"limit":     cachedData.Limit,
-					"total":     cachedData.Total,
-					"totalPage": cachedData.TotalPage,
-					"hasNext":   cachedData.HasNext,
-					"hasPrev":   cachedData.HasPrev,
-					"source":    "cache",
-				})
-				return
-			}
-		}
-	}
-
-	// MongoDB query
-	count, err := eventsCollection.CountDocuments(ctx, bson.M{})
-	if err != nil {
-		c.JSON(500, gin.H{"msg": "Count error"})
+		c.JSON(200, gin.H{"msg": "Events (cache)✨", "events": events})
 		return
 	}
 
-	cur, err := eventsCollection.Find(ctx, bson.M{}, options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)))
+	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetSort(bson.M{"created_at": -1})
+
+	cursor, err := EventCollection.Find(ctx, bson.M{}, opts)
 	if err != nil {
-		c.JSON(500, gin.H{"msg": "DB Find error"})
+		c.JSON(500, gin.H{"msg": "DB error❌"})
 		return
 	}
-	defer cur.Close(ctx)
 
 	var events []models.Event
-	if err := cur.All(ctx, &events); err != nil {
-		c.JSON(500, gin.H{"msg": "Cursor error"})
-		return
-	}
+	_ = cursor.All(ctx, &events)
 
-	totalPages := int((count + int64(limit) - 1) / int64(limit))
-	hasNext := page < totalPages
-	hasPrev := page > 1
+	go utils.RedisClient.Set(ctx, cacheKey, toJson(events), 10*time.Minute)
 
-	responseData := gin.H{
-		"msg":       "All Events (from MongoDB)✨",
-		"events":    events,
-		"page":      page,
-		"limit":     limit,
-		"total":     count,
-		"totalPage": totalPages,
-		"hasNext":   hasNext,
-		"hasPrev":   hasPrev,
-		"source":    "db",
-	}
-
-	// Cache store
-	if utils.RedisClient != nil && len(events) > 0 {
-		jsonData, _ := json.Marshal(responseData)
-		_ = utils.RedisClient.Set(ctx, cacheKey, jsonData, 10*time.Minute).Err()
-	}
-
-	c.JSON(200, responseData)
+	c.JSON(200, gin.H{"msg": "Events (db)✨", "events": events})
 }
 
-
-
-// ========================================
-// 🎉 GET ONE EVENT (Admin)
-// ========================================
+// ==========================
+// 🔥 GET ONE EVENT
+// ==========================
 func GetOneEventAdmin(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -241,89 +183,37 @@ func GetOneEventAdmin(c *gin.Context) {
 		return
 	}
 
-	cacheKey := "admin:event:" + id
-	if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-		var event models.Event
-		_ = json.Unmarshal([]byte(cached), &event)
-		c.JSON(200, gin.H{"msg": "Event (from Redis)✨", "event": event, "source": "cache"})
-		return
-	}
-
 	var event models.Event
 	if err := EventCollection.FindOne(ctx, bson.M{"_id": objID}).Decode(&event); err != nil {
 		c.JSON(404, gin.H{"msg": "Event not found❌"})
 		return
 	}
 
-	data, _ := json.Marshal(event)
-	_ = utils.RedisClient.Set(ctx, cacheKey, data, 10*time.Minute).Err()
-
-	c.JSON(200, gin.H{"msg": "Event✨", "event": event, "source": "db"})
+	c.JSON(200, gin.H{"msg": "Event✨", "event": event})
 }
 
-// ========================================
-// 🎭 GET ALL FUNCTIONS (Admin)
-// ========================================
+// ==========================
+// 🔥 GET ALL FUNCTIONS
+// ==========================
 func GetAllFunctionsAdmin(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 {
-		limit = 10
-	}
-	skip := (page - 1) * limit
-	cacheKey := "admin:functions:page=" + strconv.Itoa(page) + ":limit=" + strconv.Itoa(limit)
-
-	if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-		var funcs []models.Function
-		_ = json.Unmarshal([]byte(cached), &funcs)
-		total, _ := FunctionCollection.CountDocuments(ctx, bson.M{})
-		totalPages := (total + int64(limit) - 1) / int64(limit)
-		c.JSON(200, gin.H{
-			"msg": "All Functions (from Redis)✨", "functions": funcs,
-			"page": page, "limit": limit, "total": total, "totalPage": totalPages,
-			"hasNext": page < int(totalPages), "hasPrev": page > 1, "source": "cache",
-		})
-		return
-	}
-
-	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
-	cursor, err := FunctionCollection.Find(ctx, bson.M{}, opts)
+	cursor, err := FunctionCollection.Find(ctx, bson.M{})
 	if err != nil {
 		c.JSON(500, gin.H{"msg": "DB error❌"})
 		return
 	}
-	defer cursor.Close(ctx)
 
 	var funcs []models.Function
-	if err := cursor.All(ctx, &funcs); err != nil {
-		c.JSON(500, gin.H{"msg": "Error decoding functions❌"})
-		return
-	}
+	_ = cursor.All(ctx, &funcs)
 
-	if len(funcs) > 0 {
-		data, _ := json.Marshal(funcs)
-		_ = utils.RedisClient.Set(ctx, cacheKey, data, 10*time.Minute).Err()
-	}
-
-	total, _ := FunctionCollection.CountDocuments(ctx, bson.M{})
-	totalPages := (total + int64(limit) - 1) / int64(limit)
-
-	c.JSON(200, gin.H{
-		"msg": "All Functions✨", "functions": funcs,
-		"page": page, "limit": limit, "total": total, "totalPage": totalPages,
-		"hasNext": page < int(totalPages), "hasPrev": page > 1, "source": "db",
-	})
+	c.JSON(200, gin.H{"msg": "Functions✨", "functions": funcs})
 }
 
-// ========================================
-// 🎭 GET ONE FUNCTION (Admin)
-// ========================================
+// ==========================
+// 🔥 GET ONE FUNCTION
+// ==========================
 func GetOneFunctionAdmin(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -335,60 +225,36 @@ func GetOneFunctionAdmin(c *gin.Context) {
 		return
 	}
 
-	cacheKey := "admin:function:" + id
-	if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-		var f models.Function
-		_ = json.Unmarshal([]byte(cached), &f)
-		c.JSON(200, gin.H{"msg": "Function (from Redis)✨", "function": f, "source": "cache"})
-		return
-	}
-
 	var f models.Function
 	if err := FunctionCollection.FindOne(ctx, bson.M{"_id": objID}).Decode(&f); err != nil {
 		c.JSON(404, gin.H{"msg": "Function not found❌"})
 		return
 	}
 
-	data, _ := json.Marshal(f)
-	_ = utils.RedisClient.Set(ctx, cacheKey, data, 10*time.Minute).Err()
-
-	c.JSON(200, gin.H{"msg": "Function✨", "function": f, "source": "db"})
+	c.JSON(200, gin.H{"msg": "Function✨", "function": f})
 }
 
-// ========================================
-// 🔒 Admin Logout
-// ========================================
+// ==========================
+// 🔒 LOGOUT ADMIN
+// ==========================
 func AdminLogout(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var input struct {
+	var payload struct {
 		RefreshToken string `json:"refreshToken"`
 	}
+	_ = c.ShouldBindJSON(&payload)
 
-	if err := c.ShouldBindJSON(&input); err != nil || input.RefreshToken == "" {
-		c.JSON(400, gin.H{"msg": "Invalid request❌"})
-		return
-	}
-
-	var admin models.Admin
-	if err := AdminCollection.FindOne(ctx, bson.M{"refreshToken": input.RefreshToken}).Decode(&admin); err != nil {
-		c.JSON(401, gin.H{"msg": "Invalid refresh token❌"})
-		return
-	}
-
-	_, err := AdminCollection.UpdateByID(ctx, admin.ID, bson.M{
-		"$set": bson.M{
-			"refreshToken":  "",
-			"refreshExpiry": time.Time{},
-			"updatedAt":     time.Now(),
-		},
+	AdminCollection.UpdateOne(ctx, bson.M{"refreshToken": payload.RefreshToken}, bson.M{
+		"$set": bson.M{"refreshToken": "", "refreshExpiry": time.Time{}},
 	})
-	if err != nil {
-		c.JSON(500, gin.H{"msg": "Logout failed❌"})
-		return
-	}
 
-	_ = utils.RedisClient.Del(ctx, "admin:"+admin.ID.Hex()).Err()
 	c.JSON(200, gin.H{"msg": "Admin logged out successfully ✅"})
+}
+
+// helper
+func toJson(v interface{}) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
