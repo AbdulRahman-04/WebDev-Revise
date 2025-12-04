@@ -31,7 +31,7 @@ func main() {
 	// ----------------- DB + Redis -----------------
 	utils.DBConnect()
 	utils.ConnectRedis()
-	utils.CreateMongoIndexes()
+	// utils.CreateMongoIndexes()
 
 
 	// ----------------- Gin Engine -----------------

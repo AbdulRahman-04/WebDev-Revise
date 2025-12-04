@@ -1,10 +1,16 @@
 package routes
 
 import (
-	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/controllers/ai"
+	// "github.com/AbdulRahman-04/GoProjects/EventManagement/server/controllers/ai"
 	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/controllers/private"
 	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/middleware"
 	"github.com/gin-gonic/gin"
+
+	// ❌ remove old import
+	// "github.com/AbdulRahman-04/GoProjects/EventManagement/server/controllers/ai"
+
+	// ✅ add correct one
+	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/controllers/ai"
 )
 
 func PrivateRoutes(r *gin.Engine) {
@@ -56,9 +62,11 @@ func PrivateRoutes(r *gin.Engine) {
 		// ==========================
 		// 🤖 AI ROUTES
 		// ==========================
-		privateGroup.POST("/ai/event-desc", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.GenerateDescription)
-		privateGroup.POST("/ai/function-desc", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.GenerateFunctionDesc)
-		privateGroup.POST("/ai/assistant", middleware.OnlyUsers(), middleware.RateLimitMiddleware(3), ai.Assistant)
+		aiGroup := privateGroup.Group("/ai")
+
+		aiGroup.POST("/chat", middleware.OnlyUsers(), middleware.RateLimitMiddleware(5), ai.Chat)
+		aiGroup.POST("/recommend", middleware.OnlyUsers(), middleware.RateLimitMiddleware(5), ai.Recommend)
+		aiGroup.POST("/description", middleware.OnlyUsers(), middleware.RateLimitMiddleware(5), ai.GenerateDescription)
 
 		// ==========================
 		// 🧩 EVENT JOIN APIs
