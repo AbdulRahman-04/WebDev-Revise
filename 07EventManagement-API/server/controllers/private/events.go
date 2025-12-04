@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/AbdulRahman-04/GoProjects/EventManagement/server/models"
@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	  "go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -99,13 +99,14 @@ func CreateEvent(c *gin.Context) {
 	})
 }
 
-
 // -------------------- GET ALL EVENTS --------------------
 func GetAllEvents(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	userId := c.MustGet("userId").(primitive.ObjectID)
+
+	// pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	if page < 1 {
@@ -116,92 +117,64 @@ func GetAllEvents(c *gin.Context) {
 	}
 	skip := (page - 1) * limit
 
-	cacheKey := fmt.Sprintf("events:%s:%d:%d", userId.Hex(), page, limit)
-
-	// Try from Redis cache first
-	if utils.RedisClient != nil {
-		if cached, err := utils.RedisClient.Get(context.Background(), cacheKey).Result(); err == nil && cached != "" {
-			var cachedResponse struct {
-				Msg     string         `json:"msg"`
-				Events  []models.Event `json:"events"`
-				Page    int            `json:"page"`
-				Limit   int            `json:"limit"`
-				Total   int64          `json:"total"`
-				HasNext bool           `json:"hasNext"`
-				HasPrev bool           `json:"hasPrev"`
-				Source  string         `json:"source"`
-			}
-			if jsonErr := json.Unmarshal([]byte(cached), &cachedResponse); jsonErr == nil {
-				cachedResponse.Source = "redis"
-				c.JSON(200, cachedResponse)
-				return
-			}
-		}
-	}
-
-	var (
-		total     int64
-		allEvents []models.Event
-		countErr  error
-		findErr   error
-	)
-
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		total, countErr = eventsCollection.CountDocuments(ctx, bson.M{"userId": userId})
-	}()
-
-	go func() {
-		defer wg.Done()
-		opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetSort(bson.D{{Key: "createdAt", Value: -1}})
-		cursor, err := eventsCollection.Find(ctx, bson.M{"userId": userId}, opts)
-		if err == nil {
-			defer cursor.Close(ctx)
-			findErr = cursor.All(ctx, &allEvents)
-		} else {
-			findErr = err
-		}
-	}()
-
-	wg.Wait()
-	if countErr != nil || findErr != nil {
-		c.JSON(500, gin.H{"msg": "Failed to fetch events"})
+	// ---------------- FETCH ALL EVENTS (NO FILTER) ----------------
+	total, err := eventsCollection.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		c.JSON(500, gin.H{"msg": "Failed counting events"})
 		return
 	}
 
-	response := struct {
-		Msg     string         `json:"msg"`
-		Events  []models.Event `json:"events"`
-		Page    int            `json:"page"`
-		Limit   int            `json:"limit"`
-		Total   int64          `json:"total"`
-		HasNext bool           `json:"hasNext"`
-		HasPrev bool           `json:"hasPrev"`
-		Source  string         `json:"source"`
-	}{
-		Msg:     "All Events Are here✨",
-		Events:  allEvents,
-		Page:    page,
-		Limit:   limit,
-		Total:   total,
-		HasNext: int64(skip+limit) < total,
-		HasPrev: page > 1,
-		Source:  "db",
+	opts := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "created_at", Value: -1}})
+
+	cursor, err := eventsCollection.Find(ctx, bson.M{}, opts)
+	if err != nil {
+		c.JSON(500, gin.H{"msg": "Failed fetching events"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var events []models.Event
+	_ = cursor.All(ctx, &events)
+
+	// ---------------- PRIVACY LOGIC ----------------
+	for i, evt := range events {
+
+		// normalize ispublic values ("public", "true" = treated as public)
+		val := strings.ToLower(evt.IsPublic)
+		isPublic := val == "public" || val == "true"
+		isOwner := evt.UserId.Hex() == userId.Hex()
+
+		// public → show full
+		if isPublic {
+			continue
+		}
+
+		// private but owner → show full
+		if isOwner {
+			continue
+		}
+
+		// private & NOT owner → show limited view
+		events[i].Location = ""
+		events[i].ImageUrl = ""
+		events[i].EventAttendence = 0
+		events[i].Status = "Private"
+		events[i].EventDescription = "This is a private event. Request to join to see full details."
 	}
 
-	// Cache response safely in background
-	go func(resp any) {
-		if utils.RedisClient != nil {
-			cacheCtx := context.Background()
-			dataBytes, _ := json.Marshal(resp)
-			_ = utils.RedisClient.Set(cacheCtx, cacheKey, dataBytes, 60*time.Second).Err()
-		}
-	}(response)
-
-	c.JSON(200, response)
+	// ---------------- RESPONSE ----------------
+	c.JSON(200, gin.H{
+		"msg":     "Events fetched successfully ✨",
+		"events":  events,
+		"page":    page,
+		"limit":   limit,
+		"total":   total,
+		"hasNext": int64(skip+limit) < total,
+		"hasPrev": page > 1,
+	})
 }
 
 // -------------------- GET ONE EVENT --------------------
@@ -212,40 +185,62 @@ func GetOneEvent(c *gin.Context) {
 	userId := c.MustGet("userId").(primitive.ObjectID)
 	mongoId, err := primitive.ObjectIDFromHex(c.Param("id"))
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid param ID"})
+		c.JSON(400, gin.H{"msg": "Invalid event ID"})
 		return
 	}
 
-	cacheKey := fmt.Sprintf("event:%s:%s", userId.Hex(), mongoId.Hex())
-	var oneEvent models.Event
+	// --- Try Redis Cache First ---
+	cacheKey := fmt.Sprintf("event:%s", mongoId.Hex())
+	var event models.Event
 
-	// Try Redis first
 	if utils.RedisClient != nil {
-		if cached, err := utils.RedisClient.Get(context.Background(), cacheKey).Result(); err == nil && cached != "" {
-			if err := json.Unmarshal([]byte(cached), &oneEvent); err == nil {
-				c.JSON(200, gin.H{"msg": "Event from Redis✅", "event": oneEvent, "source": "redis"})
-				return
-			}
+		if cached, _ := utils.RedisClient.Get(ctx, cacheKey).Result(); cached != "" {
+			_ = json.Unmarshal([]byte(cached), &event)
+			returnResponseWithPrivacy(c, event, userId, "redis")
+			return
 		}
 	}
 
-	// Fallback to MongoDB
-	if err := eventsCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oneEvent); err != nil {
-		c.JSON(404, gin.H{"msg": "No event found❌"})
+	// ---- Fetch Event without ownership restriction ----
+	err = eventsCollection.FindOne(ctx, bson.M{"_id": mongoId}).Decode(&event)
+	if err != nil {
+		c.JSON(404, gin.H{"msg": "Event not found ❌"})
 		return
 	}
 
-	// Cache the event
+	// ---- Save in cache ---
 	go func(evt models.Event) {
 		if utils.RedisClient != nil {
-			cacheCtx := context.Background()
-			dataBytes, _ := json.Marshal(evt)
-			_ = utils.RedisClient.Set(cacheCtx, cacheKey, dataBytes, 60*time.Second).Err()
+			data, _ := json.Marshal(evt)
+			utils.RedisClient.Set(context.Background(), cacheKey, data, 60*time.Second)
 		}
-	}(oneEvent)
+	}(event)
 
-	c.JSON(200, gin.H{"msg": "Event from DB✅", "event": oneEvent, "source": "db"})
+	// ---- Final Output Based on Privacy ----
+	returnResponseWithPrivacy(c, event, userId, "db")
 }
+
+func returnResponseWithPrivacy(c *gin.Context, evt models.Event, userId primitive.ObjectID, source string) {
+
+	isPublic := strings.ToLower(evt.IsPublic) == "public" || strings.ToLower(evt.IsPublic) == "true"
+	isOwner := evt.UserId.Hex() == userId.Hex()
+
+	// If private and NOT owner -> mask
+	if !isPublic && !isOwner {
+		evt.Location = ""
+		evt.ImageUrl = ""
+		evt.Status = "Private"
+		evt.EventAttendence = 0
+		evt.EventDescription = "This is a private event. Request to join for full details."
+	}
+
+	c.JSON(200, gin.H{
+		"msg":    "Event fetched successfully",
+		"source": source,
+		"event":  evt,
+	})
+}
+
 func EditEventApi(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -260,7 +255,10 @@ func EditEventApi(c *gin.Context) {
 	// Fetch existing event
 	var oldEvent models.Event
 	if err := eventsCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oldEvent); err != nil {
-		c.JSON(404, gin.H{"msg": "No event found to update"})
+		c.JSON(403, gin.H{
+			"msg":    "Access denied 🚫",
+			"reason": "You are not the owner of this event, so you cannot update it.",
+		})
 		return
 	}
 
@@ -348,7 +346,6 @@ func EditEventApi(c *gin.Context) {
 	})
 }
 
-
 // -------------------- DELETE ONE EVENT --------------------
 func DeleteOneEvent(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -357,16 +354,27 @@ func DeleteOneEvent(c *gin.Context) {
 	userId := c.MustGet("userId").(primitive.ObjectID)
 	mongoId, err := primitive.ObjectIDFromHex(c.Param("id"))
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid param ID"})
+		c.JSON(400, gin.H{"msg": "Invalid event ID"})
 		return
 	}
 
-	if _, err := eventsCollection.DeleteOne(ctx, bson.M{"userId": userId, "_id": mongoId}); err != nil {
-		c.JSON(404, gin.H{"msg": "No Event Found or userId mismatch"})
+	// TRY deleting event owned by this user
+	result, err := eventsCollection.DeleteOne(ctx, bson.M{"userId": userId, "_id": mongoId})
+	if err != nil {
+		c.JSON(500, gin.H{"msg": "Database delete error"})
 		return
 	}
 
-	// Invalidate Redis cache
+	// ---- IMPORTANT FIX: Detect unauthorized delete attempt ----
+	if result.DeletedCount == 0 {
+		c.JSON(403, gin.H{
+			"msg":    "Access denied 🚫",
+			"reason": "Only the event owner can delete this event.",
+		})
+		return
+	}
+
+	// Clear Redis cache async
 	go func() {
 		if utils.RedisClient != nil {
 			cacheCtx := context.Background()
@@ -375,7 +383,7 @@ func DeleteOneEvent(c *gin.Context) {
 		}
 	}()
 
-	c.JSON(200, gin.H{"msg": "One Event is deleted✅"})
+	c.JSON(200, gin.H{"msg": "Event deleted successfully ✅"})
 }
 
 // -------------------- DELETE ALL EVENTS --------------------
@@ -499,7 +507,6 @@ func JoinEvent(c *gin.Context) {
 	})
 }
 
-
 // -------------------- APPROVE JOIN REQUEST (Optimized) --------------------
 func ApproveJoinRequest(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -543,50 +550,49 @@ func ApproveJoinRequest(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"msg":      "Join request approved ✅",
-		"status":   "accepted",
-		"eventId":  req.EventID,
-		"userId":   req.RequesterID,
+		"msg":     "Join request approved ✅",
+		"status":  "accepted",
+		"eventId": req.EventID,
+		"userId":  req.RequesterID,
 	})
 }
 
 func RejectJoinRequest(c *gin.Context) {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    ownerId := c.MustGet("userId").(primitive.ObjectID)
-    requestID, err := primitive.ObjectIDFromHex(c.Param("id"))
-    if err != nil {
-        c.JSON(400, gin.H{"msg": "Invalid Request ID"})
-        return
-    }
+	ownerId := c.MustGet("userId").(primitive.ObjectID)
+	requestID, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		c.JSON(400, gin.H{"msg": "Invalid Request ID"})
+		return
+	}
 
-    joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
-    update := bson.M{"$set": bson.M{"status": "rejected", "updated_at": time.Now()}}
-    res, err := joinColl.UpdateOne(ctx, bson.M{"_id": requestID, "ownerId": ownerId}, update)
-    if err != nil || res.MatchedCount == 0 {
-        c.JSON(404, gin.H{"msg": "No such request or unauthorized"})
-        return
-    }
+	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
+	update := bson.M{"$set": bson.M{"status": "rejected", "updated_at": time.Now()}}
+	res, err := joinColl.UpdateOne(ctx, bson.M{"_id": requestID, "ownerId": ownerId}, update)
+	if err != nil || res.MatchedCount == 0 {
+		c.JSON(404, gin.H{"msg": "No such request or unauthorized"})
+		return
+	}
 
-    c.JSON(200, gin.H{"msg": "Join request rejected ❌"})
+	c.JSON(200, gin.H{"msg": "Join request rejected ❌"})
 }
 
 func ViewPendingRequests(c *gin.Context) {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    ownerId := c.MustGet("userId").(primitive.ObjectID)
-    joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
+	ownerId := c.MustGet("userId").(primitive.ObjectID)
+	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
 
-    cursor, err := joinColl.Find(ctx, bson.M{"ownerId": ownerId, "status": "pending"})
-    if err != nil {
-        c.JSON(500, gin.H{"msg": "DB error"})
-        return
-    }
-    var requests []models.JoinRequest
-    _ = cursor.All(ctx, &requests)
+	cursor, err := joinColl.Find(ctx, bson.M{"ownerId": ownerId, "status": "pending"})
+	if err != nil {
+		c.JSON(500, gin.H{"msg": "DB error"})
+		return
+	}
+	var requests []models.JoinRequest
+	_ = cursor.All(ctx, &requests)
 
-    c.JSON(200, gin.H{"msg": "All pending join requests", "data": requests})
+	c.JSON(200, gin.H{"msg": "All pending join requests", "data": requests})
 }
-

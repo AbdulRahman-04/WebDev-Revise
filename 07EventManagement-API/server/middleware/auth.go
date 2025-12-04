@@ -12,76 +12,76 @@ import (
 
 var myKey = []byte(config.AppConfig.JWTKEY)
 
-func AuthMiddleware() gin.HandlerFunc{
+// AuthMiddleware validates Bearer token and sets userId & role in context
+func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-        
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(400, gin.H{
-				"msg": "No token provided",
-			})
+			c.JSON(400, gin.H{"msg": "No token provided"})
 			c.Abort()
-			return 
+			return
 		}
 
 		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer"{
-			c.JSON(400, gin.H{
-				"msg": "invalid token format",
-			})
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(400, gin.H{"msg": "invalid token format"})
 			c.Abort()
-			return 
+			return
 		}
 
 		myToken := parts[1]
 
-		token, err := jwt.Parse(myToken, func(t *jwt.Token) (interface{}, error) {
+		// Parse with MapClaims so we can inspect fields
+		token, err := jwt.ParseWithClaims(myToken, jwt.MapClaims{}, func(t *jwt.Token) (interface{}, error) {
 			return myKey, nil
 		})
-		if err != nil {
-			c.JSON(400, gin.H{
-				"msg": "Invalid or Expired Token❌",
-			})
+		if err != nil || !token.Valid {
+			c.JSON(401, gin.H{"msg": "Invalid or Expired Token❌"})
 			c.Abort()
-			return 
+			return
 		}
 
-		// get data from token
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			c.JSON(400, gin.H{
-				"msg": "No Data found in token",
-			})
+			c.JSON(400, gin.H{"msg": "No Data found in token"})
 			c.Abort()
-			return 
+			return
 		}
 
-		// get userId from token 
-		userStrId, ok := claims["id"].(string)
-		if !ok {
-			c.JSON(400, gin.H{
-				"msg": "No userId Data found in token",
-			})
+		// Try both "id" (preferred) and "userId" (compat)
+		var userStrId string
+		if v, exists := claims["id"]; exists {
+			if s, ok := v.(string); ok {
+				userStrId = s
+			}
+		}
+		if userStrId == "" {
+			if v, exists := claims["userId"]; exists {
+				if s, ok := v.(string); ok {
+					userStrId = s
+				}
+			}
+		}
+
+		if userStrId == "" {
+			c.JSON(400, gin.H{"msg": "No userId Data found in token"})
 			c.Abort()
-			return 
+			return
 		}
 
 		userId, err := primitive.ObjectIDFromHex(userStrId)
-		if err != nil  {
-			c.JSON(400, gin.H{
-				"msg": "error converting to user id or exxpired token",
-			})
+		if err != nil {
+			c.JSON(400, gin.H{"msg": "error converting to user id or expired token"})
 			c.Abort()
-			return 
+			return
 		}
 
 		role, ok := claims["role"].(string)
-		if !ok {
-			c.JSON(400, gin.H{
-				"msg": "No role Data found in token",
-			})
+		if !ok || role == "" {
+			c.JSON(400, gin.H{"msg": "No role Data found in token"})
 			c.Abort()
-			return 
+			return
 		}
 
 		// set the role and userid in context variable
@@ -92,13 +92,26 @@ func AuthMiddleware() gin.HandlerFunc{
 	}
 }
 
-// GenerateJWT creates a new token for given user email (or id)
+// GenerateJWT creates a token using only email (legacy/compat)
 func GenerateJWT(email string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"email": email,          // you can replace with "id" if you want
-		"role":  "user",         // default role
-		"exp":   jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // expiry 1 day
+		"email": email,
+		"role":  "user",
+		"exp":   jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 		"iat":   jwt.NewNumericDate(time.Now()),
 	})
+	return token.SignedString(myKey)
+}
+
+// GenerateOAuthJWT creates JWT containing the user's Mongo DB ID (use this for OAuth flows)
+func GenerateOAuthJWT(userID, email, role string) (string, error) {
+	claims := jwt.MapClaims{
+		"id":    userID, // keep key "id" so middleware picks it up
+		"email": email,
+		"role":  role,
+		"iat":   jwt.NewNumericDate(time.Now()),
+		"exp":   jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(myKey)
 }

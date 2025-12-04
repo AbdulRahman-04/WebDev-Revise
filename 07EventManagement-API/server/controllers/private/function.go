@@ -23,6 +23,28 @@ var functionCollection *mongo.Collection
 func FunctionCollect() {
 	functionCollection = utils.MongoClient.Database("Event_Booking").Collection("functions")
 }
+
+// -------------------- HELPER: Privacy apply on single function --------------------
+func applyFunctionPrivacy(fn models.Function, userId primitive.ObjectID) models.Function {
+	val := strings.ToLower(fn.IsPublic)
+	isPublic := val == "public" || val == "true"
+	isOwner := fn.UserId.Hex() == userId.Hex()
+
+	// Public or owner → full data allowed
+	if isPublic || isOwner {
+		return fn
+	}
+
+	// Private & NOT owner → mask sensitive fields
+	fn.Location = ""
+	fn.ImageUrl = ""
+	fn.Status = "Private"
+	fn.FuncDesc = "This is a private function. Request to join to see full details."
+
+	return fn
+}
+
+// -------------------- CREATE FUNCTION --------------------
 func CreateFunction(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -35,7 +57,7 @@ func CreateFunction(c *gin.Context) {
 	status := c.PostForm("status")
 	location := c.PostForm("location")
 
-	// 🔹 Step 1: Upload file (if any) first — avoid race conditions
+	// Step 1: Upload file (if any)
 	imageUrl := ""
 	if file, _ := c.FormFile("file"); file != nil {
 		if path, err := utils.FileUpload(c); err == nil {
@@ -43,7 +65,7 @@ func CreateFunction(c *gin.Context) {
 		}
 	}
 
-	// 🔹 Step 2: Prepare new function data
+	// Step 2: Prepare new function
 	newFunction := models.Function{
 		ID:        primitive.NewObjectID(),
 		UserId:    userId,
@@ -58,13 +80,13 @@ func CreateFunction(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	// 🔹 Step 3: Insert into MongoDB
+	// Step 3: Insert DB
 	if _, err := functionCollection.InsertOne(ctx, newFunction); err != nil {
 		c.JSON(500, gin.H{"msg": "DB insert failed", "error": err.Error()})
 		return
 	}
 
-	// 🔹 Step 4: Clear Redis cache asynchronously (no wait)
+	// Step 4: Clear cache async
 	go func(uid string) {
 		rctx := context.Background()
 		if utils.RedisClient != nil {
@@ -77,19 +99,18 @@ func CreateFunction(c *gin.Context) {
 	}(userId.Hex())
 
 	c.JSON(200, gin.H{
-		"msg":              "New Function Created ✅",
-		"functionDetails":  newFunction,
-		"response_time_ms": "Optimized no-race concurrent safe",
+		"msg":             "New Function Created ✅",
+		"functionDetails": newFunction,
 	})
 }
 
-
-
+// -------------------- GET ALL FUNCTIONS (with privacy) --------------------
 func GetAllFunctions(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	userId := c.MustGet("userId").(primitive.ObjectID)
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	if page < 1 {
@@ -100,8 +121,10 @@ func GetAllFunctions(c *gin.Context) {
 	}
 	skip := (page - 1) * limit
 
+	// cache per-user (kyunki privacy user-specific hai)
 	cacheKey := fmt.Sprintf("function_list:%s:page:%d:limit:%d", userId.Hex(), page, limit)
 
+	// Try Redis
 	if utils.RedisClient != nil {
 		if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
 			var payload struct {
@@ -129,15 +152,21 @@ func GetAllFunctions(c *gin.Context) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
+	// Count ALL functions (not just user ke)
 	go func() {
 		defer wg.Done()
-		total, countErr = functionCollection.CountDocuments(ctx, bson.M{"userId": userId})
+		total, countErr = functionCollection.CountDocuments(ctx, bson.M{})
 	}()
 
+	// Fetch ALL paginated functions
 	go func() {
 		defer wg.Done()
-		opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetSort(bson.D{{Key: "createdAt", Value: -1}})
-		cursor, err := functionCollection.Find(ctx, bson.M{"userId": userId}, opts)
+		opts := options.Find().
+			SetSkip(int64(skip)).
+			SetLimit(int64(limit)).
+			SetSort(bson.D{{Key: "created_at", Value: -1}})
+
+		cursor, err := functionCollection.Find(ctx, bson.M{}, opts)
 		if err == nil {
 			defer cursor.Close(ctx)
 			findErr = cursor.All(ctx, &allFunctions)
@@ -153,7 +182,12 @@ func GetAllFunctions(c *gin.Context) {
 		return
 	}
 
-	// Cache result async
+	// Apply privacy per function
+	for i, fn := range allFunctions {
+		allFunctions[i] = applyFunctionPrivacy(fn, userId)
+	}
+
+	// Cache processed data async
 	go func() {
 		rctx := context.Background()
 		if utils.RedisClient != nil {
@@ -177,6 +211,7 @@ func GetAllFunctions(c *gin.Context) {
 	})
 }
 
+// -------------------- GET ONE FUNCTION (with privacy) --------------------
 func GetOneFunction(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -185,27 +220,31 @@ func GetOneFunction(c *gin.Context) {
 	paramId := c.Param("id")
 	mongoId, err := primitive.ObjectIDFromHex(paramId)
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid param ID"})
+		c.JSON(400, gin.H{"msg": "Invalid function ID"})
 		return
 	}
 
-	cacheKey := fmt.Sprintf("function:%s:%s", userId.Hex(), mongoId.Hex())
+	cacheKey := fmt.Sprintf("function:%s", mongoId.Hex())
 	var oneFunc models.Function
 
+	// Try Redis
 	if utils.RedisClient != nil {
 		if cached, err := utils.RedisClient.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
 			if jerr := json.Unmarshal([]byte(cached), &oneFunc); jerr == nil {
-				c.JSON(200, gin.H{"msg": "Function from Redis✅", "function": oneFunc, "source": "redis"})
+				fn := applyFunctionPrivacy(oneFunc, userId)
+				c.JSON(200, gin.H{"msg": "Function from Redis✅", "function": fn, "source": "redis"})
 				return
 			}
 		}
 	}
 
-	if err := functionCollection.FindOne(ctx, bson.M{"userId": userId, "_id": mongoId}).Decode(&oneFunc); err != nil {
+	// Fetch without userId filter (ID se)
+	if err := functionCollection.FindOne(ctx, bson.M{"_id": mongoId}).Decode(&oneFunc); err != nil {
 		c.JSON(404, gin.H{"msg": "No function found❌"})
 		return
 	}
 
+	// Cache raw event
 	go func() {
 		rctx := context.Background()
 		if utils.RedisClient != nil {
@@ -215,9 +254,12 @@ func GetOneFunction(c *gin.Context) {
 		}
 	}()
 
-	c.JSON(200, gin.H{"msg": "Function from DB✅", "function": oneFunc, "source": "db"})
+	fn := applyFunctionPrivacy(oneFunc, userId)
+
+	c.JSON(200, gin.H{"msg": "Function from DB✅", "function": fn, "source": "db"})
 }
 
+// -------------------- EDIT FUNCTION (owner only) --------------------
 func EditFunction(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -229,9 +271,19 @@ func EditFunction(c *gin.Context) {
 		return
 	}
 
+	// Pehle function exist check karo
 	var existing models.Function
-	if err := functionCollection.FindOne(ctx, bson.M{"_id": funcId, "userId": userId}).Decode(&existing); err != nil {
-		c.JSON(404, gin.H{"msg": "Function not found"})
+	if err := functionCollection.FindOne(ctx, bson.M{"_id": funcId}).Decode(&existing); err != nil {
+		c.JSON(404, gin.H{"msg": "Function not found ❌"})
+		return
+	}
+
+	// Ab ownership check
+	if existing.UserId.Hex() != userId.Hex() {
+		c.JSON(403, gin.H{
+			"msg":    "Access denied 🚫",
+			"reason": "Only the function owner can update this function.",
+		})
 		return
 	}
 
@@ -242,7 +294,7 @@ func EditFunction(c *gin.Context) {
 	status := c.PostForm("status")
 	location := c.PostForm("location")
 
-	// 🔹 Step 1: Upload image (if given)
+	// Step 1: Upload image (if given)
 	imageUrl := existing.ImageUrl
 	if file, _ := c.FormFile("file"); file != nil {
 		if path, err := utils.FileUpload(c); err == nil {
@@ -250,7 +302,7 @@ func EditFunction(c *gin.Context) {
 		}
 	}
 
-	// 🔹 Step 2: Build update map dynamically
+	// Step 2: Build update map dynamically
 	updateFields := bson.M{}
 	if funcName != "" {
 		updateFields["funcname"] = funcName
@@ -273,17 +325,17 @@ func EditFunction(c *gin.Context) {
 	updateFields["imageUrl"] = imageUrl
 	updateFields["updatedAt"] = time.Now()
 
-	// 🔹 Step 3: Update in DB
+	// Step 3: Update in DB
 	if _, err := functionCollection.UpdateByID(ctx, funcId, bson.M{"$set": updateFields}); err != nil {
 		c.JSON(500, gin.H{"msg": "DB update failed", "error": err.Error()})
 		return
 	}
 
-	// 🔹 Step 4: Clear Redis cache async
+	// Step 4: Clear Redis cache async
 	go func(uid, fid string) {
 		rctx := context.Background()
 		if utils.RedisClient != nil {
-			_ = utils.RedisClient.Del(rctx, fmt.Sprintf("function:%s:%s", uid, fid)).Err()
+			_ = utils.RedisClient.Del(rctx, fmt.Sprintf("function:%s", fid)).Err()
 			iter := utils.RedisClient.Scan(rctx, 0, fmt.Sprintf("function_list:%s:*", uid), 0).Iterator()
 			for iter.Next(rctx) {
 				_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
@@ -292,13 +344,12 @@ func EditFunction(c *gin.Context) {
 	}(userId.Hex(), funcId.Hex())
 
 	c.JSON(200, gin.H{
-		"msg":              "Function Updated Successfully ✅",
-		"updatedFields":    updateFields,
-		"response_time_ms": "Optimized & Safe",
+		"msg":           "Function Updated Successfully ✅",
+		"updatedFields": updateFields,
 	})
 }
 
-
+// -------------------- DELETE ONE FUNCTION (owner only) --------------------
 func DeleteOneFunction(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -307,36 +358,54 @@ func DeleteOneFunction(c *gin.Context) {
 	paramId := c.Param("id")
 	mongoId, err := primitive.ObjectIDFromHex(paramId)
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "Invalid param ID"})
+		c.JSON(400, gin.H{"msg": "Invalid function ID"})
 		return
 	}
 
-	res, err := functionCollection.DeleteOne(ctx, bson.M{"userId": userId, "_id": mongoId})
+	// Pehle function exist check karo
+	var fn models.Function
+	if err := functionCollection.FindOne(ctx, bson.M{"_id": mongoId}).Decode(&fn); err != nil {
+		c.JSON(404, gin.H{"msg": "Function not found ❌"})
+		return
+	}
+
+	// Ownership check
+	if fn.UserId.Hex() != userId.Hex() {
+		c.JSON(403, gin.H{
+			"msg":    "Access denied 🚫",
+			"reason": "Only the function owner can delete this function.",
+		})
+		return
+	}
+
+	// Actual delete
+	res, err := functionCollection.DeleteOne(ctx, bson.M{"_id": mongoId})
 	if err != nil {
-		c.JSON(400, gin.H{"msg": "DB error"})
+		c.JSON(500, gin.H{"msg": "DB error while deleting"})
 		return
 	}
 	if res.DeletedCount == 0 {
-		c.JSON(404, gin.H{"msg": "No function found to delete"})
+		c.JSON(500, gin.H{"msg": "Delete failed unexpectedly"})
 		return
 	}
 
-	go func() {
+	// Clear Redis cache
+	go func(fid string) {
 		rctx := context.Background()
 		if utils.RedisClient != nil {
-			cacheKey := fmt.Sprintf("function:%s:%s", userId.Hex(), mongoId.Hex())
-			_ = utils.RedisClient.Del(rctx, cacheKey).Err()
-			pattern := fmt.Sprintf("function_list:%s:*", userId.Hex())
+			_ = utils.RedisClient.Del(rctx, fmt.Sprintf("function:%s", fid)).Err()
+			pattern := "function_list:*"
 			iter := utils.RedisClient.Scan(rctx, 0, pattern, 0).Iterator()
 			for iter.Next(rctx) {
 				_ = utils.RedisClient.Del(rctx, iter.Val()).Err()
 			}
 		}
-	}()
+	}(mongoId.Hex())
 
 	c.JSON(200, gin.H{"msg": "One Function Deleted✅"})
 }
 
+// -------------------- DELETE ALL FUNCTIONS (only own) --------------------
 func DeleteAllFunctions(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -354,7 +423,7 @@ func DeleteAllFunctions(c *gin.Context) {
 		if utils.RedisClient != nil {
 			patterns := []string{
 				fmt.Sprintf("function_list:%s:*", userId.Hex()),
-				fmt.Sprintf("function:%s:*", userId.Hex()),
+				"function:*",
 			}
 			for _, pattern := range patterns {
 				iter := utils.RedisClient.Scan(rctx, 0, pattern, 0).Iterator()
@@ -368,8 +437,7 @@ func DeleteAllFunctions(c *gin.Context) {
 	c.JSON(200, gin.H{"msg": "All Functions Deleted✅"})
 }
 
-
-// -------------------- JOIN FUNCTION (Hybrid Model Safe & Concurrent) --------------------
+// -------------------- JOIN FUNCTION --------------------
 func JoinFunction(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -387,13 +455,13 @@ func JoinFunction(c *gin.Context) {
 	var function models.Function
 	var existingReq models.JoinRequest
 
-	// ✅ Step 1: Check if function exists
+	// Step 1: Check if function exists
 	if err := funcColl.FindOne(ctx, bson.M{"_id": funcID}).Decode(&function); err != nil {
 		c.JSON(404, gin.H{"msg": "Function not found"})
 		return
 	}
 
-	// ✅ Step 2: Check if user already requested or joined
+	// Step 2: Check if user already requested or joined
 	err = joinColl.FindOne(ctx, bson.M{
 		"functionId":  funcID,
 		"requesterId": userId,
@@ -403,14 +471,14 @@ func JoinFunction(c *gin.Context) {
 		return
 	}
 
-	// ✅ Step 3: Prevent self-join
+	// Step 3: Prevent self-join
 	if function.UserId == userId {
 		c.JSON(400, gin.H{"msg": "You cannot join your own function"})
 		return
 	}
 
-	// ✅ Step 4: Public function — instant join
-	if strings.ToLower(function.IsPublic) == "public" {
+	// Step 4: Public function — instant join
+	if strings.ToLower(function.IsPublic) == "public" || strings.ToLower(function.IsPublic) == "true" {
 		go func() {
 			fmt.Printf("✅ User %s joined public function '%s'\n", userId.Hex(), function.FuncName)
 		}()
@@ -424,7 +492,7 @@ func JoinFunction(c *gin.Context) {
 		return
 	}
 
-	// ✅ Step 5: Private function — create join request asynchronously
+	// Step 5: Private function — create join request
 	newReq := models.JoinRequest{
 		ID:          primitive.NewObjectID(),
 		FunctionID:  &funcID,
@@ -532,9 +600,9 @@ func ViewPendingFunctionRequests(c *gin.Context) {
 	joinColl := utils.MongoClient.Database("Event_Booking").Collection("join_requests")
 
 	cursor, err := joinColl.Find(ctx, bson.M{
-		"ownerId":     ownerId,
-		"status":      "pending",
-		"functionId":  bson.M{"$exists": true},
+		"ownerId":    ownerId,
+		"status":     "pending",
+		"functionId": bson.M{"$exists": true},
 	})
 	if err != nil {
 		c.JSON(500, gin.H{"msg": "DB error"})
